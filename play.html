@@ -1,0 +1,1436 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>营地守望 · Camp Watch</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#1d2420; user-select:none;
+    font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif; }
+  #game { display:block; width:100%; height:100%; touch-action:none; }
+  #hud { position:fixed; inset:0; pointer-events:none; }
+  .panel { position:absolute; background:rgba(24,20,18,.74); color:#f6efe2; border-radius:14px;
+    padding:8px 12px; font-size:14px; line-height:1.45; backdrop-filter:blur(4px); }
+  #top { top:10px; left:10px; min-width:112px; }
+  #top b { font-size:22px; color:#ffd976; }
+  #crowns { color:#ffd976; letter-spacing:2px; font-size:15px }
+  #vet { color:#ffd976; font-size:12px; }
+  #clock { top:10px; right:10px; text-align:right; font-size:13px; }
+  #clock #wx { font-size:12px; color:#a9c6dd; }
+  #msg { position:absolute; bottom:172px; left:50%; transform:translateX(-50%); white-space:nowrap;
+    font-size:13px; color:#ffe9c0; background:rgba(24,20,18,.66); border-radius:12px; padding:6px 14px;
+    opacity:0; transition:opacity .18s; }
+  #btns { position:absolute; right:8px; bottom:10px; display:grid; grid-template-columns:repeat(3,1fr);
+    gap:6px; pointer-events:auto; }
+  .btn { background:rgba(38,32,28,.94); color:#f3e7d3; border:1px solid rgba(255,214,120,.32);
+    border-radius:11px; padding:7px 5px; font-size:12px; text-align:center; min-width:56px; }
+  .btn span { display:block; font-size:10px; color:#c9a15c; margin-top:1px; }
+  .btn:active { background:rgba(96,74,42,.95); }
+  #stick { position:absolute; left:14px; bottom:14px; width:116px; height:116px; border-radius:50%;
+    background:rgba(30,26,22,.42); border:2px solid rgba(255,214,120,.22); pointer-events:auto; }
+  #knob { position:absolute; left:50%; top:50%; width:50px; height:50px; margin:-25px 0 0 -25px;
+    border-radius:50%; background:rgba(255,214,120,.78); }
+  #start { position:fixed; inset:0; background:rgba(12,10,14,.92); display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:12px; color:#ffe9c0; pointer-events:auto; z-index:9; }
+  #start h1 { font-size:32px; letter-spacing:4px; }
+  #start p { font-size:13px; color:#cbbfa8; max-width:86%; text-align:center; line-height:1.7 }
+  .mode { width:min(80vw,360px); padding:12px 16px; border-radius:14px; background:rgba(30,26,22,.92);
+    border:1px solid rgba(255,214,120,.3); display:flex; justify-content:space-between; align-items:center; }
+  .mode b { font-size:15px } .mode i { font-style:normal; font-size:12px; color:#b9ab95 }
+  #err { position:fixed; left:8px; top:8px; right:8px; max-height:44%; overflow:auto; display:none;
+    background:rgba(120,20,20,.95); color:#fff; font:12px/1.4 monospace; padding:8px; border-radius:8px; z-index:99 }
+  @media (max-width:560px) {
+    #top { padding:6px 10px } #top b { font-size:19px }
+    #clock { padding:6px 10px; font-size:12px }
+    .btn { font-size:11px; padding:7px 4px; min-width:50px }
+    .btn span { font-size:9px }
+    #stick { width:102px; height:102px } #knob { width:44px; height:44px; margin:-22px 0 0 -22px }
+    #msg { bottom:198px; font-size:12px; max-width:74vw; white-space:normal; text-align:center }
+    #start h1 { font-size:26px }
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud">
+  <div class="panel" id="top"><b id="coin">30</b> 金<div id="crowns">★★★</div><div id="vet"></div></div>
+  <div class="panel" id="clock"><div id="day">第 1 天 白天</div><div id="phase"></div><div id="wx"></div></div>
+  <div id="msg"></div>
+  <div id="btns"></div>
+  <div id="stick"><div id="knob"></div></div>
+</div>
+<div id="start">
+  <h1>营地守望</h1>
+  <p>白天招人、造墙、收钱；夜里守住大本营。<br>手机：左下摇杆移动，右下按钮操作。<br>电脑：WASD 移动，按钮同样可点。</p>
+  <div class="mode" data-d="1"><b>和平模式</b><i>怪物更弱 · 收入更高</i></div>
+  <div class="mode" data-d="2"><b>普通模式</b><i>标准难度</i></div>
+  <div class="mode" data-d="3"><b>残酷模式</b><i>怪物更强 · 奖励更高</i></div>
+</div>
+<div id="err"></div>
+<script>
+(function () {
+"use strict";
+const errBox = document.getElementById('err');
+window.onerror = (m, s, l, c) => { errBox.style.display = 'block';
+  errBox.textContent += m + ' @' + l + ':' + c + '\n'; };
+
+const cv = document.getElementById('game'), ctx = cv.getContext('2d');
+let W = 0, H = 0; const DPR = Math.min(2, window.devicePixelRatio || 1);
+function resize() { W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR; cv.style.width = W + 'px'; cv.style.height = H + 'px';
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0); }
+addEventListener('resize', resize); resize();
+
+const TAU = Math.PI * 2;
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+function rrect(x, y, w, h, r) { ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y, w, h, r); else ctx.rect(x, y, w, h); }
+
+const WORLD = { w: 2800, h: 2000 };
+const KEEP = { x: WORLD.w / 2, y: WORLD.h / 2 };
+const WH = 250;
+const DAY_LEN = 84, NIGHT_LEN = 56;
+const ROLE = {
+  idle:   { hp: 8,  color: '#e2cdb0', name: '居民' },
+  worker: { hp: 8,  color: '#c49460', name: '工人' },
+  hunter: { hp: 6,  color: '#7c9a6e', name: '猎人' },
+  knight: { hp: 34, color: '#96a0b2', name: '骑士' },
+  lumber: { hp: 9,  color: '#b08a5e', name: '伐木工' },
+  farmer: { hp: 7,  color: '#d8ba6c', name: '农夫' }
+};
+const WX = {
+  clear: { name: '晴', desc: '农场 +11%' },
+  rain:  { name: '雨', desc: '弓手/箭塔射程 -25%' },
+  fog:   { name: '雾', desc: '远程 -38% · 怪更快' },
+  snow:  { name: '雪', desc: '双方移速 -15%' }
+};
+
+const G = {
+  state: 'menu', diff: 2, scale: { hp: 1, income: 1 },
+  t: 0, day: 1, phase: 'day', phaseT: DAY_LEN, weather: 'clear',
+  coins: 30, crowns: 3, keepHp: 440, keepMax: 440,
+  walls: [], units: [], monsters: [], enemies: [], camps: [], buildings: [], projects: [],
+  arrows: [], coinsW: [], pops: [], fx: [], trees: [], refugees: [],
+  player: { x: KEEP.x, y: KEEP.y + 150, face: 1, walk: 0 },
+  keys: {}, joy: { x: 0, y: 0, on: false },
+  msg: '', msgT: 0, shake: 0, hitstop: 0, army: 0,
+  kills: 0, lost: 0, peak: 30, bloodCount: 0, safeDay: false,
+  chronicle: '', dawn: null, promo: null
+};
+
+function say(t, d) { G.msg = t; G.msgT = d || 2.4; }
+
+// ================================================================ 世界构建
+function makeWalls(cx, cy, half, hp) {
+  const mk = (x1, y1, x2, y2) => ({ x1, y1, x2, y2, hp, max: hp, level: 1 });
+  return [mk(cx - half, cy - half, cx + half, cy - half),
+          mk(cx - half, cy + half, cx + half, cy + half),
+          mk(cx - half, cy - half, cx - half, cy + half),
+          mk(cx + half, cy - half, cx + half, cy + half)];
+}
+
+function addUnit(x, y, role) {
+  const hp = ROLE[role].hp;
+  G.units.push({ x, y, role, hp, max: hp, cd: 0, purse: 0, bob: rnd(0, 6), walk: 0,
+    face: 1, moving: false, kills: 0, atk: 0, hurt: 0, veteran: false, onWall: false,
+    home: { x, y }, target: null, tg: 0, garrison: null, farm: null, wallT: 0, wallPost: null });
+}
+
+function addEnemy(camp, x, y, mode) {
+  G.enemies.push({ x, y, camp, mode: mode || 'guard', hp: 12 * camp.power,
+    max: 12 * camp.power, dmg: 1 + camp.power, cd: 0, bob: rnd(0, 6), walk: 0,
+    face: 1, atk: 0, hurt: 0, target: null, life: mode === 'raid' ? 100 : 1e9, moving: false });
+}
+
+function addMonster(kind) {
+  const a = rnd(0, TAU), r = rnd(WH + 380, WH + 640);
+  const baseHp = 5 + G.day * 1.4, baseDmg = 1.8 + G.day * 0.65;
+  const spec = {
+    imp:     { hp: baseHp, dmg: baseDmg, sp: 34 + G.day * 1.6, r: 17 },
+    brute:   { hp: baseHp * 2.2, dmg: baseDmg * 1.5, sp: (34 + G.day * 1.6) * 0.8, r: 24 },
+    thrower: { hp: baseHp * 0.8, dmg: baseDmg * 0.9, sp: (34 + G.day * 1.6) * 0.75, r: 18 },
+    bomber:  { hp: baseHp * 0.7, dmg: baseDmg * 0.6, sp: (34 + G.day * 1.6) * 1.25, r: 15 },
+    shield:  { hp: baseHp * 1.8, dmg: baseDmg * 0.8, sp: (34 + G.day * 1.6) * 0.7, r: 20 },
+    flyer:   { hp: baseHp * 0.6, dmg: baseDmg * 0.8, sp: (34 + G.day * 1.6) * 1.5, r: 14 }
+  }[kind];
+  const hp = spec.hp * G.scale.hp;
+  G.monsters.push({ kind, x: KEEP.x + Math.cos(a) * r, y: KEEP.y + Math.sin(a) * r,
+    hp, max: hp, dmg: spec.dmg * G.scale.hp, speed: spec.sp, r: spec.r,
+    bob: rnd(0, 6), flash: 0, atk: 0, hpFlash: 0, cd: rnd(0.8, 2.4), face: 1,
+    target: null, targetStruct: null });
+}
+
+function reset() {
+  Object.assign(G, {
+    t: 0, day: 1, phase: 'day', phaseT: DAY_LEN, weather: 'clear',
+    coins: 30, crowns: 3, keepHp: 500, keepMax: 500,
+    units: [], monsters: [], enemies: [], camps: [], buildings: [], projects: [],
+    arrows: [], coinsW: [], pops: [], fx: [], trees: [], refugees: [],
+    msg: '', msgT: 0, shake: 0, hitstop: 0, army: 0,
+    kills: 0, lost: 0, peak: 30, bloodCount: 0, safeDay: false, dawn: null, promo: null
+  });
+  G.player.x = KEEP.x; G.player.y = KEEP.y + 150;
+  G.walls = makeWalls(KEEP.x, KEEP.y, WH, 300);
+  for (let i = 0; i < 5; i++) addUnit(KEEP.x + rnd(-70, 70), KEEP.y + rnd(70, 130), 'idle');
+  for (let i = 0; i < 2; i++) {
+    const ang = rnd(0, TAU), rad = rnd(760, 1000);
+    const x = clamp(KEEP.x + Math.cos(ang) * rad, 230, WORLD.w - 230);
+    const y = clamp(KEEP.y + Math.sin(ang) * rad, 230, WORLD.h - 230);
+    const power = rnd(0.8, 1.3);
+    const camp = { id: i, x, y, power, hp: 380 * power, max: 380 * power, owner: 'enemy',
+      walls: makeWalls(x, y, 118, 90 * power), timer: rnd(75, 115), purse: 0, t: 0 };
+    G.camps.push(camp);
+    for (let k = 0; k < 2 + Math.round(power * 2); k++) {
+      const a2 = rnd(0, TAU);
+      addEnemy(camp, x + Math.cos(a2) * rnd(60, 120), y + Math.sin(a2) * rnd(60, 120), 'guard');
+    }
+  }
+  for (let i = 0; i < 150; i++) {
+    const a = rnd(0, TAU), r = rnd(WH + 90, 1150);
+    const x = KEEP.x + Math.cos(a) * r, y = KEEP.y + Math.sin(a) * r * 0.92;
+    if (x > 40 && x < WORLD.w - 40 && y > 40 && y < WORLD.h - 40)
+      G.trees.push({ x, y, s: rnd(0.78, 1.22), v: Math.random() < 0.28 ? 1 : 0, seed: rnd(0, 6) });
+  }
+}
+
+// ================================================================ 几何
+function insideWalls(x, y, pad) {
+  pad = pad === undefined ? 6 : pad;
+  return Math.abs(x - KEEP.x) < WH - pad && Math.abs(y - KEEP.y) < WH - pad;
+}
+function wallAt(x, y, pad, walls, cx, cy) {
+  walls = walls || G.walls; cx = cx === undefined ? KEEP.x : cx; cy = cy === undefined ? KEEP.y : cy;
+  pad = pad || 22;
+  for (const w of walls) {
+    if (w.hp <= 0) continue;
+    const vx = w.x2 - w.x1, vy = w.y2 - w.y1;
+    const L2 = vx * vx + vy * vy || 1;
+    let t = ((x - w.x1) * vx + (y - w.y1) * vy) / L2;
+    t = clamp(t, 0, 1);
+    const px = w.x1 + vx * t, py = w.y1 + vy * t;
+    if (Math.hypot(x - px, y - py) <= pad) return w;
+  }
+  return null;
+}
+function moveTo(e, tx, ty, dt, sp) {
+  const dx = tx - e.x, dy = ty - e.y, d = Math.hypot(dx, dy) || 1;
+  if (d < 2) return;
+  e.x += dx / d * sp * dt; e.y += dy / d * sp * dt;
+  e.walk = (e.walk || 0) + dt * 9; e.moving = true;
+  if (Math.abs(dx) > 0.4) e.face = dx > 0 ? 1 : -1;
+}
+function nearestFrom(list, x, y, maxD) {
+  let best = null, bd = maxD || 1e9;
+  for (const o of list) {
+    if (o.dead) continue;
+    const d = dist(x, y, o.x, o.y);
+    if (d < bd) { bd = d; best = o; }
+  }
+  return best;
+}
+function hostilesForMine() { return G.monsters.concat(G.enemies.filter(e => !e.camp || e.camp.owner !== 'mine')); }
+
+// ================================================================ 玩家动作
+function hire(role) {
+  const cost = { worker: 3, hunter: 4, knight: 6, lumber: 3, farmer: 4 }[role];
+  if (G.coins < cost) return say('金币不够（' + cost + '）');
+  let best = null, bd = 1e9;
+  for (const u of G.units) {
+    if (u.role !== 'idle') continue;
+    const d = dist(u.x, u.y, G.player.x, G.player.y);
+    if (d < bd) { bd = d; best = u; }
+  }
+  if (!best) return say('没有空闲居民了');
+  best.role = role; best.max = best.hp = ROLE[role].hp;
+  G.coins -= cost;
+  say('一名' + ROLE[role].name + '上岗');
+}
+
+const COST = { wall: 10, expand: 30, farm: 20, tower: 34, statue: 25, barracks: 40, hospital: 34, trap: 14 };
+const DUR = { wall: 55, expand: 70, farm: 50, tower: 60, statue: 55, barracks: 70, hospital: 60, trap: 22 };
+
+function startProject(kind) {
+  if (G.state !== 'play') return;
+  const cost = COST[kind];
+  if (G.coins < cost) return say('需要 ' + cost + ' 金');
+  if (kind === 'wall' && Math.max(...G.walls.map(w => w.level)) >= 5) return say('城墙已满级');
+  if (kind === 'expand' && WH >= 420) return say('疆域已到极限');
+  if (kind === 'farm' || kind === 'tower') {
+    // 已建成 2 个时，靠近可升级分支
+    if (G.buildings.filter(b => b.type === kind).length >= 2) {
+      const near = G.buildings.find(b => b.type === kind && !b.branch &&
+        dist(b.x, b.y, G.player.x, G.player.y) < 130);
+      if (!near) return say('最多 2 个（靠近已有的可升级分支）');
+      const cost = kind === 'tower' ? 30 : 25;
+      if (G.coins < cost) return say('升级分支需要 ' + cost + ' 金');
+      G.coins -= cost;
+      if (kind === 'tower') {
+        const hasRapid = G.buildings.some(b => b.branch === 'rapid');
+        near.branch = hasRapid ? 'heavy' : 'rapid';
+        say(hasRapid ? '升级为：重箭塔' : '升级为：连射塔', 2.4);
+      } else {
+        const hasHigh = G.buildings.some(b => b.branch === 'high');
+        near.branch = hasHigh ? 'bomb' : 'high';
+        say(hasHigh ? '升级为：自爆农场' : '升级为：高产农场', 2.4);
+      }
+      G.fx.push({ type: 'ring', x: near.x, y: near.y, t: 0, dur: 0.6, color: '#ffe08a' });
+      return;
+    }
+  }
+  G.coins -= cost;
+  const a = rnd(0, TAU);
+  const rad = kind === 'trap' ? rnd(WH + 30, WH + 110) : rnd(WH * 0.34, WH * 0.7);
+  G.projects.push({ kind, x: KEEP.x + Math.cos(a) * rad, y: KEEP.y + Math.sin(a) * rad,
+    dur: DUR[kind] * (G.safeDay ? 0.7 : 1), prog: 0 });
+  say({ wall: '工匠开始加固城墙', expand: '开始扩建疆域', farm: '农场开工',
+        tower: '箭塔开工', statue: '雕像开工', barracks: '兵营开工',
+        hospital: '医院开工', trap: '布置陷阱' }[kind] + '（需要工人施工）');
+}
+
+function finishProject(p) {
+  G.fx.push({ type: 'ring', x: p.x, y: p.y, t: 0, dur: 0.7, color: '#ffe08a' });
+  if (p.kind === 'wall') G.walls.forEach(w => { w.level++; w.max = 300 * w.level; w.hp = w.max; });
+  else if (p.kind === 'expand') { expandWalls(); }
+  else G.buildings.push({ type: p.kind === 'statue' ? 'statue' : p.kind, x: p.x, y: p.y,
+    cd: 0, purse: 0, t: 0, branch: null });
+  say('完工：' + ({ wall: '城墙升级', expand: '疆域扩大', farm: '农场', tower: '箭塔',
+    statue: '雕像', barracks: '兵营', hospital: '医院', trap: '陷阱' }[p.kind]), 2);
+}
+
+function expandWalls() {
+  const add = 50;
+  G.walls = G.walls.map(w => {
+    const out = { ...w, max: w.max + 60 };
+    out.hp = out.max;
+    return out;
+  });
+  // 简单处理：四周整体外扩，重建四段墙
+  const half = Math.min(420, Math.round(Math.abs(G.walls[0].x2 - KEEP.x)) + add);
+  G.walls = makeWalls(KEEP.x, KEEP.y, half, 300 * Math.max(...G.walls.map(w => w.level)));
+}
+
+function orderArmy() {
+  if (G.state !== 'play') return;
+  G.army = 40;
+  say('全军出击！骑士们冲向敌方营地', 2.4);
+}
+
+function plantFlag() {
+  if (G.state !== 'play') return;
+  for (const c of G.camps) {
+    if (c.owner === 'ruin' && dist(c.x, c.y, G.player.x, G.player.y) < 120) {
+      if (G.coins < 30) return say('插旗需要 30 金');
+      G.coins -= 30; c.owner = 'mine'; c.hp = c.max * 0.6;
+      G.fx.push({ type: 'ring', x: c.x, y: c.y, t: 0, dur: 0.9, color: '#ffe08a' });
+      return say('营地归你了，开始产出金币');
+    }
+  }
+  say('走到被攻陷的营地废墟旁才能插旗');
+}
+
+function garrison() {
+  if (G.state !== 'play') return;
+  for (const c of G.camps) {
+    if (c.owner === 'mine' && dist(c.x, c.y, G.player.x, G.player.y) < 130) {
+      if (G.coins < 9) return say('驻军需要 9 金');
+      const free = G.units.filter(u => u.role === 'knight' && !u.garrison).slice(0, 2);
+      if (!free.length) return say('没有闲置骑士');
+      G.coins -= 9;
+      for (const u of free) { u.garrison = c; u.home = { x: c.x, y: c.y }; }
+      return say(free.length + ' 名骑士驻守该营地');
+    }
+  }
+  say('站在自己的营地旁才能驻军');
+}
+
+function quickRecruit() {
+  if (G.coins < 6) return say('补员需要 6 金');
+  G.coins -= 6;
+  addUnit(KEEP.x + rnd(-50, 50), KEEP.y + rnd(70, 120), 'idle');
+  say('来了一名新居民');
+}
+function quickRepair() {
+  if (G.coins < 10) return say('修墙需要 10 金');
+  G.coins -= 10;
+  G.walls.forEach(w => w.hp = w.max);
+  say('城墙全部修好');
+}
+
+// ================================================================ 伤害与克制
+function hurtMonster(m, amount, src) {
+  let mult = 1;
+  if (m.kind === 'shield') mult = src === 'melee' ? 1.35 : 0.45;
+  else if (m.kind === 'flyer') mult = src === 'arrow' ? 1.25 : 0.85;
+  else if (m.kind === 'thrower') mult = src === 'melee' ? 1.4 : 0.9;
+  else if (m.kind === 'bomber') mult = src === 'arrow' ? 1.2 : 0.8;
+  m.hp -= amount * mult;
+  m.flash = 0.12; m.hpFlash = 2;
+  if (m.hp <= 0 && !m.dead) {
+    m.dead = true; G.kills++;
+    G.fx.push({ type: 'star', x: m.x, y: m.y - 6, t: 0, dur: 0.4, color: '#fff6c8' });
+    G.coinsW.push({ x: m.x + rnd(-6, 6), y: m.y + rnd(-6, 6), dead: false, life: 30 });
+  }
+}
+function hurtUnit(u, amount) {
+  u.hp -= amount; u.hurt = 0.16; u.atk = -0.16;
+  if (u.hp <= 0 && !u.dead) { u.dead = true; G.lost++;
+    G.fx.push({ type: 'star', x: u.x, y: u.y - 6, t: 0, dur: 0.4, color: '#ffb4a4' }); }
+}
+
+// ================================================================ 昼夜 / 天气 / 事件
+function rollWeather() {
+  const old = G.weather;
+  if (G.day % 8 === 0) G.weather = 'rain';
+  else G.weather = pick(['clear', 'clear', 'clear', 'rain', 'fog', 'snow']);
+  if (G.weather !== old) say('天气转为' + WX[G.weather].name + '：' + WX[G.weather].desc, 3.2);
+}
+function rollEvent() {
+  if (Math.random() > 0.42) return;
+  const ev = pick(['merchant', 'wanderer', 'plague', 'harvest']);
+  if (ev === 'merchant') { G.coins += 15; say('商人路过，留下 15 金币', 3); }
+  else if (ev === 'wanderer') { addUnit(KEEP.x + rnd(-60, 60), KEEP.y + rnd(70, 110), 'idle');
+    say('一名流浪者加入了营地', 3); }
+  else if (ev === 'plague' && G.units.filter(u => u.role === 'idle').length) {
+    const v = pick(G.units.filter(u => u.role === 'idle')); v.dead = true; G.lost++;
+    say('营地爆发疫病，走了一位居民', 3); }
+  else if (ev === 'harvest') { G.coins += 10; say('今年丰收，额外获得 10 金币', 3); }
+}
+function pickChronicle() {
+  const lines = ['第 %d 天，瞭望塔报告：东边有火光。', '第 %d 天，木匠说城墙的木头该换了。',
+    '第 %d 天，孩子们在墙根下捡到一枚旧币。', '第 %d 天，风从北边来，带着一股铁锈味。',
+    '第 %d 天，猎人在林子里发现了很多脚印。', '第 %d 天，哨兵换了三轮，没人敢合眼。',
+    '第 %d 天，有人在墙上刻了一道新痕。'];
+  return pick(lines).replace('%d', G.day);
+}
+
+function nightStart() {
+  const d = G.day;
+  G.phase = 'night'; G.phaseT = NIGHT_LEN;
+  const blood = d % 8 === 0;
+  if (blood) { G.bloodCount++; G.weather = 'rain'; }
+  let count = Math.min(24, 2 + Math.floor((d - 1) * 2.2));
+  if (blood) count = Math.round(count * 1.75);
+  for (let i = 0; i < count; i++) {
+    let kind = 'imp';
+    const roll = Math.random();
+    if (d >= 3 && i % 5 === 0) kind = 'brute';
+    else if (blood && G.bloodCount >= 3 && roll < 0.22) kind = 'flyer';
+    else if (d >= 2 && roll < 0.34) kind = 'thrower';
+    else if (d >= 4 && roll < 0.46) kind = 'bomber';
+    else if (d >= 5 && roll < 0.58) kind = 'shield';
+    addMonster(kind);
+  }
+  say(blood ? '血月第 ' + G.bloodCount + ' 次：怪潮来了！' : '第 ' + d + ' 夜：' + count + ' 只怪来了', 3);
+}
+function dayStart() {
+  G.day++; G.phase = 'day'; G.phaseT = DAY_LEN;
+  rollWeather(); rollEvent();
+  G.chronicle = pickChronicle();
+  let bonus = 6 + G.day * 2;
+  if (G.safeDay) bonus = Math.round(bonus * 1.5);
+  G.coins += Math.round(bonus * G.scale.income);
+  G.walls.forEach(w => w.hp = Math.min(w.max, w.hp + w.max * 0.18));
+  if (G.units.length < 4) addUnit(KEEP.x + rnd(-50, 50), KEEP.y + rnd(70, 110), 'idle');
+  G.safeDay = G.bloodCount > 0 && G.day % 8 === 1;
+  G.dawn = { kills: G.kills - (G._k0 || 0), lost: G.lost - (G._l0 || 0), income: Math.round(bonus) };
+  say('第 ' + G.day + ' 天：+ ' + Math.round(bonus) + ' 金，城墙自动修补', 3);
+  if (G.camps.every(c => c.owner === 'mine')) { G.state = 'win'; return; }
+  if (G.day > 30) { G.state = 'win'; G.surviveWin = true; }
+}
+
+// ================================================================ 输入
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (G.state === 'menu') return;
+  if (G.state === 'win' || G.state === 'lose') {
+    if (k === 'r' || k === 'enter' || k === ' ') { reset(); G.state = 'play'; }
+    return;
+  }
+  G.keys[k] = true;
+  if (k === 'q') orderArmy();
+  else if (k === 'f') plantFlag();
+  else if (k === 'h') garrison();
+  else if (k === 'y') quickRecruit();
+  else if (k === 'u') quickRepair();
+  else if (k === 'e') startProject('wall');
+  else if (k === 'x') startProject('expand');
+  else if (k === 'b') startProject('farm');
+  else if (k === 't') startProject('tower');
+  else if (k === '1') hire('worker');
+  else if (k === '2') hire('hunter');
+  else if (k === '3') hire('knight');
+  else if (k === '4') hire('lumber');
+  else if (k === '5') hire('farmer');
+  else if (k === 'r') { reset(); G.state = 'play'; }
+  if (['w', 'a', 's', 'd', ' ', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) e.preventDefault();
+});
+addEventListener('keyup', e => { G.keys[e.key.toLowerCase()] = false; });
+
+const stickEl = document.getElementById('stick'), knobEl = document.getElementById('knob');
+let sx0 = 0, sy0 = 0;
+function stickMove(e) {
+  const t = e.touches ? e.touches[0] : e;
+  let dx = t.clientX - sx0, dy = t.clientY - sy0;
+  const d = Math.hypot(dx, dy), mx = 44;
+  if (d > mx) { dx = dx / d * mx; dy = dy / d * mx; }
+  knobEl.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+  G.joy.x = dx / mx; G.joy.y = dy / mx;
+}
+function stickEnd() { G.joy.on = false; G.joy.x = G.joy.y = 0; knobEl.style.transform = 'translate(0,0)'; }
+stickEl.addEventListener('touchstart', e => { e.preventDefault();
+  const t = e.touches[0]; sx0 = t.clientX; sy0 = t.clientY; G.joy.on = true; stickMove(e); }, { passive: false });
+stickEl.addEventListener('touchmove', e => { e.preventDefault(); stickMove(e); }, { passive: false });
+stickEl.addEventListener('touchend', e => { e.preventDefault(); stickEnd(); }, { passive: false });
+stickEl.addEventListener('touchcancel', e => { e.preventDefault(); stickEnd(); }, { passive: false });
+stickEl.addEventListener('mousedown', e => { G.joy.on = true; sx0 = e.clientX; sy0 = e.clientY; });
+addEventListener('mousemove', e => { if (G.joy.on) stickMove(e); });
+addEventListener('mouseup', () => { if (G.joy.on) stickEnd(); });
+
+// ================================================================ 主逻辑
+function update(dt) {
+  if (G.state !== 'play') { G.t += dt; return; }
+  if (G.hitstop > 0) { G.hitstop -= dt; dt *= 0.25; }
+  G.t += dt;
+  if (G.msgT > 0) G.msgT -= dt;
+  if (G.shake > 0) G.shake = Math.max(0, G.shake - dt * 2);
+  if (G.army > 0) G.army -= dt;
+  if (G.promo) { G.promo.t -= dt; if (G.promo.t <= 0) G.promo = null; }
+  if (G.dawn) { G.dawn.t -= dt; if (G.dawn.t <= 0) G.dawn = null; }
+  if (G.coins > G.peak) G.peak = G.coins;
+  // 大本营：附近没有敌人时缓慢自愈（与电脑版一致）
+  if (G.keepHp < G.keepMax) {
+    const near = G.monsters.some(m => dist(m.x, m.y, KEEP.x, KEEP.y) < 620) ||
+                 G.enemies.some(e => dist(e.x, e.y, KEEP.x, KEEP.y) < 620);
+    if (!near) G.keepHp = Math.min(G.keepMax, G.keepHp + 2.5 * dt);
+  }
+
+  G.phaseT -= dt;
+  if (G.phaseT <= 0) {
+    if (G.phase === 'day') { G._k0 = G.kills; G._l0 = G.lost; nightStart(); }
+    else dayStart();
+  }
+
+  updatePlayer(dt);
+  updateUnits(dt);
+  updateMonsters(dt);
+  updateEnemies(dt);
+  updateCamps(dt);
+  updateBuildings(dt);
+  updateProjects(dt);
+  if (G.camps.length && G.camps.every(c => c.owner === 'mine')) G.state = 'win';
+
+  for (const a of G.arrows) a.t += dt;
+  G.arrows = G.arrows.filter(a => a.t < a.dur);
+  for (const c of G.coinsW) { c.life -= dt; if (dist(c.x, c.y, G.player.x, G.player.y) < 34) {
+      c.dead = true; G.coins++; G.pops.push({ x: c.x, y: c.y - 14, t: 0.9, text: '+1' }); } }
+  G.coinsW = G.coinsW.filter(c => !c.dead && c.life > 0);
+  for (const p of G.pops) { p.t -= dt; p.y -= 20 * dt; }
+  G.pops = G.pops.filter(p => p.t > 0);
+  for (const f of G.fx) f.t += dt;
+  G.fx = G.fx.filter(f => f.t < f.dur);
+  G.units = G.units.filter(u => !u.dead);
+  G.monsters = G.monsters.filter(m => !m.dead);
+  G.enemies = G.enemies.filter(e => !e.dead && e.life > 0);
+}
+
+function updatePlayer(dt) {
+  const p = G.player;
+  let vx = 0, vy = 0;
+  if (G.keys['a'] || G.keys['arrowleft']) vx--;
+  if (G.keys['d'] || G.keys['arrowright']) vx++;
+  if (G.keys['w'] || G.keys['arrowup']) vy--;
+  if (G.keys['s'] || G.keys['arrowdown']) vy++;
+  vx += G.joy.x * 1.2; vy += G.joy.y * 1.2;
+  const m = Math.hypot(vx, vy);
+  if (m > 0.14) {
+    vx /= m; vy /= m;
+    const sp = 200 * (G.weather === 'snow' ? 0.88 : 1);
+    p.x = clamp(p.x + vx * sp * dt, 30, WORLD.w - 30);
+    p.y = clamp(p.y + vy * sp * dt, 30, WORLD.h - 30);
+    p.walk += dt * 10;
+    if (Math.abs(vx) > 0.1) p.face = vx > 0 ? 1 : -1;
+  }
+  for (const u of G.units) {
+    if (u.purse > 0 && dist(u.x, u.y, p.x, p.y) < 36) {
+      G.coins += u.purse; G.pops.push({ x: u.x, y: u.y - 22, t: 0.9, text: '+' + u.purse });
+      u.purse = 0;
+    }
+  }
+}
+
+function nearestEnemyCamp() {
+  let best = null, bd = 1e9;
+  for (const c of G.camps) {
+    if (c.owner === 'mine' || c.owner === 'ruin') continue;
+    const d = dist(c.x, c.y, G.player.x, G.player.y);
+    if (d < bd) { bd = d; best = c; }
+  }
+  return best;
+}
+
+function updateUnits(dt) {
+  const kx = KEEP.x, ky = KEEP.y;
+  for (const u of G.units) {
+    u.moving = false;
+    if (u.cd > 0) u.cd -= dt;
+    if (u.hurt > 0) u.hurt -= dt;
+    if (u.atk > 0) u.atk -= dt;
+    if (u.swing > 0) u.swing -= dt;
+    const hostiles = hostilesForMine();
+
+    if (u.role === 'idle') {
+      if (!u.target || Math.random() < dt * 0.5) u.target = { x: u.home.x + rnd(-45, 45), y: u.home.y + rnd(-35, 35) };
+      if (u.target) moveTo(u, u.target.x, u.target.y, dt, 55);
+      continue;
+    }
+
+    if (u.role === 'worker') {
+      let proj = null, pd = 1e9;
+      for (const p of G.projects) {
+        const d = dist(u.x, u.y, p.x, p.y);
+        if (d < pd) { pd = d; proj = p; }
+      }
+      if (proj) {
+        if (pd > 34) moveTo(u, proj.x, proj.y, dt, 86);
+        continue;
+      }
+      const weak = G.walls.reduce((a, b) => (a.hp / a.max < b.hp / b.max ? a : b));
+      if (weak.hp < weak.max) {
+        const mx = (weak.x1 + weak.x2) / 2, my = (weak.y1 + weak.y2) / 2;
+        if (dist(u.x, u.y, mx, my) > 34) moveTo(u, mx, my, dt, 86);
+        else weak.hp = Math.min(weak.max, weak.hp + 18 * dt);
+        continue;
+      }
+      if (!u.target || Math.random() < dt * 0.4) u.target = { x: kx + rnd(-80, 80), y: ky + rnd(-50, 80) };
+      if (u.target) moveTo(u, u.target.x, u.target.y, dt, 52);
+      continue;
+    }
+
+    if (u.role === 'hunter') {
+      const night = G.phase === 'night';
+      u.tg -= dt;
+      let threat = u.target && u.target.hp !== undefined && !u.target.dead ? u.target : null;
+      if (threat && dist(threat.x, threat.y, u.x, u.y) > 560) threat = null;
+      if (!threat || u.tg <= 0) { threat = nearestFrom(hostiles, u.x, u.y, 520); u.target = threat; u.tg = 0.5; }
+      const rangeMul = G.weather === 'rain' ? 0.857 : G.weather === 'fog' ? 0.62 : 1;
+      if (night) {
+        // 上墙：朝威胁方向的内侧站位
+        u.wallT -= dt;
+        if (!u.wallPost || u.wallT <= 0) {
+          const ang = threat ? Math.atan2(threat.y - ky, threat.x - kx) : rnd(0, TAU);
+          u.wallPost = { x: kx + Math.cos(ang) * (WH - 38), y: ky + Math.sin(ang) * (WH - 38) };
+          u.wallT = 1.5;
+        }
+        const d = dist(u.x, u.y, u.wallPost.x, u.wallPost.y);
+        if (d > 32) { u.onWall = false; moveTo(u, u.wallPost.x, u.wallPost.y, dt, 100); continue; }
+        u.onWall = true;
+        if (threat && u.cd <= 0 && dist(u.x, u.y, threat.x, threat.y) < 420 * rangeMul) {
+          u.cd = 1.7; u.atk = 0.22; u.face = threat.x > u.x ? 1 : -1;
+          shootArrow(u, threat, 1.08 * rangeMul, true);
+        }
+      } else {
+        u.onWall = false;
+        const prey = nearestFrom(hostiles, u.x, u.y, 700);
+        if (prey) {
+          if (dist(u.x, u.y, prey.x, prey.y) > 330) moveTo(u, prey.x, prey.y, dt, 82);
+          else if (u.cd <= 0) { u.cd = 2.0; u.atk = 0.2; u.face = prey.x > u.x ? 1 : -1;
+            shootArrow(u, prey, 1.0, true); }
+        } else {
+          if (!u.target || Math.random() < dt * 0.4) u.target = { x: kx + rnd(-620, 620), y: ky + rnd(-520, 520) };
+          moveTo(u, u.target.x, u.target.y, dt, 70);
+          u.purse += dt * 0.18;
+        }
+      }
+      continue;
+    }
+
+    if (u.role === 'knight') {
+      u.tg -= dt;
+      let tgt = null;
+      const enemyUnit = nearestFrom(hostiles, u.x, u.y, 520);
+      if (enemyUnit) tgt = enemyUnit;
+      if (!tgt) {
+        if (u.garrison) {
+          const enemy = nearestFrom(G.enemies.filter(e => e.camp !== u.garrison && e.camp.owner !== 'mine'), u.x, u.y, 260);
+          if (enemy) tgt = enemy;
+          else if (dist(u.x, u.y, u.garrison.x, u.garrison.y) > 90) moveTo(u, u.garrison.x, u.garrison.y, dt, 78);
+          continue;
+        }
+        const camp = (G.army > 0 ? nearestEnemyCamp() : null);
+        if (camp) {
+          const wall = wallAt(u.x, u.y, 30, camp.walls, camp.x, camp.y);
+          if (wall) { if (u.cd <= 0) { wall.hp -= 2.4; u.cd = 0.5; u.atk = 0.22; u.swing = 0.2; } }
+          else if (dist(u.x, u.y, camp.x, camp.y) > 90) moveTo(u, camp.x, camp.y, dt, 84);
+          else if (u.cd <= 0) { camp.hp -= 2.4; u.cd = 0.5; u.atk = 0.22; u.swing = 0.2;
+            if (camp.hp <= 0) { camp.owner = 'ruin'; camp.hp = 0; say('敌方营地被攻陷！走过去插旗', 3); } }
+          continue;
+        }
+        if (G.phase === 'night') {
+          if (!u.target || Math.random() < dt * 0.5) u.target = { x: kx + rnd(-160, 160), y: ky + rnd(-130, 130) };
+          moveTo(u, u.target.x, u.target.y, dt, 64);
+        } else if (!insideWalls(u.x, u.y)) moveTo(u, kx, ky, dt, 84);
+        continue;
+      }
+      const d = dist(u.x, u.y, tgt.x, tgt.y);
+      if (d > 34) moveTo(u, tgt.x, tgt.y, dt, 82);
+      else if (u.cd <= 0) {
+        u.cd = 0.55; u.atk = 0.22; u.swing = 0.2;
+        u.face = tgt.x > u.x ? 1 : -1;
+        const dmg = 2.4 * (u.veteran ? 1.3 : 1);
+        if (tgt.kind) hurtMonster(tgt, dmg, 'melee'); else { tgt.hp -= dmg; tgt.hurt = 0.16; if (tgt.hp <= 0) tgt.dead = true; }
+        if (tgt.hp <= 0 || tgt.dead) { u.kills++; if (!u.veteran && u.kills >= 5) promote(u); }
+      }
+      continue;
+    }
+
+    if (u.role === 'farmer') {
+      let farm = u.farm;
+      if (!farm || farm.dead) farm = G.buildings.find(b => b.type === 'farm' && !b.owner);
+      if (farm) {
+        farm.owner = u; u.farm = farm;
+        if (dist(u.x, u.y, farm.x, farm.y + 18) > 26) moveTo(u, farm.x, farm.y + 18, dt, 74);
+      } else if (!u.target || Math.random() < dt * 0.4) {
+        u.target = { x: kx + rnd(-90, 90), y: ky + rnd(30, 110) };
+        moveTo(u, u.target.x, u.target.y, dt, 48);
+      }
+      continue;
+    }
+
+    if (u.role === 'lumber') {
+      const tree = nearestFrom(G.trees, u.x, u.y, 900);
+      if (tree) {
+        if (dist(u.x, u.y, tree.x, tree.y) > 40) moveTo(u, tree.x, tree.y, dt, 72);
+        else { u.cd -= 0; if (!u.chop) u.chop = 0; u.chop += dt;
+          if (u.chop > 6) { u.chop = 0; u.purse += 1; tree.dead = true;
+            G.fx.push({ type: 'star', x: tree.x, y: tree.y - 30, t: 0, dur: 0.4, color: '#d6f0a8' }); } }
+      } else if (!insideWalls(u.x, u.y)) moveTo(u, kx, ky, dt, 70);
+      continue;
+    }
+  }
+  // 清理被砍倒的树
+  G.trees = G.trees.filter(t => !t.dead);
+}
+
+function promote(u) {
+  u.veteran = true;
+  u.max = u.max * 1.5; u.hp = u.max;
+  G.promo = { text: ROLE[u.role].name + '晋升老兵！', t: 2.6 };
+  G.fx.push({ type: 'ring', x: u.x, y: u.y, t: 0, dur: 0.7, color: '#ffe08a' });
+  say('你的' + ROLE[u.role].name + '成了老兵', 2.4);
+}
+
+function shootArrow(u, target, dmg, isMine) {
+  const d = dist(u.x, u.y - 14, target.x, target.y);
+  G.arrows.push({ x: u.x, y: u.y - 14, tx: target.x, ty: target.y - 8, t: 0,
+    dur: Math.max(0.12, d / 900), mine: !!isMine });
+  if (target.kind) hurtMonster(target, dmg, 'arrow');
+  else { target.hp -= dmg; target.hurt = 0.16; }
+}
+
+function updateMonsters(dt) {
+  for (const m of G.monsters) {
+    m.bob += dt * 6;
+    if (m.flash > 0) m.flash -= dt;
+    if (m.atk > 0) m.atk -= dt;
+    if (m.hpFlash > 0) m.hpFlash -= dt;
+    const speed = m.speed * (G.weather === 'snow' ? 0.85 : G.weather === 'fog' ? 1.05 : 1);
+
+    if (m.kind === 'flyer') {
+      const prey = nearestFrom(G.units, m.x, m.y, 420);
+      if (prey) {
+        if (dist(m.x, m.y, prey.x, prey.y) > 26) moveTo(m, prey.x, prey.y, dt, speed);
+        else { if (m.cd <= 0) { hurtUnit(prey, m.dmg * 0.9); m.cd = 1.0; m.atk = 0.16; } }
+        m.cd -= dt;
+        continue;
+      }
+      if (dist(m.x, m.y, KEEP.x, KEEP.y) < 62) {
+        G.keepHp -= m.dmg * 0.8 * dt;
+        if (G.keepHp <= 0) loseCrown();
+        continue;
+      }
+      moveTo(m, KEEP.x, KEEP.y, dt, speed);
+      continue;
+    }
+
+    if (!m.targetStruct) {
+      if (G.camps.length && Math.random() < 0.25) m.targetStruct = pick(G.camps);
+      else m.targetStruct = { x: KEEP.x, y: KEEP.y, keep: true };
+    }
+    const ts = m.targetStruct;
+    const wall = wallAt(m.x, m.y, 24, ts.keep ? G.walls : ts.walls, ts.x, ts.y);
+    if (wall) {
+      wall.hp -= m.dmg * dt * 1.2;
+      m.atk = 0.2;
+      if (wall.hp <= 0 && ts.keep) G.fx.push({ type: 'star', x: wall.x1, y: wall.y1, t: 0, dur: 0.5, color: '#e8c98a' });
+      continue;
+    }
+    if (ts.keep) {
+      const pd = nearestFrom(G.units, m.x, m.y, 240);
+      if (pd) {
+        if (dist(m.x, m.y, pd.x, pd.y) > 28) moveTo(m, pd.x, pd.y, dt, speed);
+        else { m.cd -= dt; if (m.cd <= 0) { hurtUnit(pd, m.dmg * 0.8); m.cd = 1.2; m.atk = 0.16; } }
+        continue;
+      }
+      if (dist(m.x, m.y, KEEP.x, KEEP.y) < 66) {
+        G.keepHp -= m.dmg * 0.35 * dt;
+        if (G.keepHp <= 0) loseCrown();
+        continue;
+      }
+      moveTo(m, KEEP.x, KEEP.y, dt, speed);
+    } else {
+      if (dist(m.x, m.y, ts.x, ts.y) < 100) {
+        ts.hp -= m.dmg * 0.9 * dt;
+        if (ts.hp <= 0 && ts.owner !== 'ruin') { ts.owner = 'ruin'; ts.hp = 0; }
+        continue;
+      }
+      moveTo(m, ts.x, ts.y, dt, speed);
+    }
+  }
+}
+
+function loseCrown() {
+  G.crowns--;
+  G.keepHp = G.keepMax * 0.55;
+  G.shake = 1; G.monsters = [];
+  G.fx.push({ type: 'ring', x: KEEP.x, y: KEEP.y, t: 0, dur: 1, color: '#ff9a7a' });
+  if (G.crowns <= 0) { G.state = 'lose'; return; }
+  say('王冠被抢走一顶！还剩 ' + G.crowns + ' 顶', 3);
+}
+
+function updateEnemies(dt) {
+  for (const e of G.enemies) {
+    e.life -= dt;
+    if (e.atk > 0) e.atk -= dt;
+    if (e.hurt > 0) e.hurt -= dt;
+    e.moving = false;
+    const mine = nearestFrom(G.units, e.x, e.y, e.mode === 'raid' ? 340 : 200);
+    if (mine) {
+      const d = dist(e.x, e.y, mine.x, mine.y);
+      if (d > 30) moveTo(e, mine.x, mine.y, dt, 74);
+      else { e.cd -= dt; if (e.cd <= 0) { hurtUnit(mine, e.dmg); e.cd = 1.1; e.atk = 0.16; } }
+      continue;
+    }
+    const goal = e.mode === 'raid' ? { x: KEEP.x, y: KEEP.y } : { x: e.camp.x, y: e.camp.y };
+    const wall = wallAt(e.x, e.y, 24, e.mode === 'raid' ? G.walls : e.camp.walls,
+                        e.mode === 'raid' ? KEEP.x : e.camp.x, e.mode === 'raid' ? KEEP.y : e.camp.y);
+    if (wall) { wall.hp -= e.dmg * dt; e.atk = 0.2; continue; }
+    if (dist(e.x, e.y, goal.x, goal.y) > (e.mode === 'raid' ? 70 : 60))
+      moveTo(e, goal.x, goal.y, dt, 76);
+    else if (e.mode === 'raid') {
+      G.keepHp -= e.dmg * 0.7 * dt;
+      if (G.keepHp <= 0) loseCrown();
+    }
+  }
+}
+
+function updateCamps(dt) {
+  for (const c of G.camps) {
+    if (c.owner === 'mine') {
+      c.t += dt;
+      if (c.t > 4) { c.t = 0; c.purse = Math.min(12, c.purse + 1); }
+      if (c.purse > 0 && dist(c.x, c.y, G.player.x, G.player.y) < 150) {
+        G.coins += c.purse; G.pops.push({ x: c.x, y: c.y - 60, t: 1, text: '+' + c.purse });
+        c.purse = 0;
+      }
+      for (const w of c.walls) if (w.hp > 0 && w.hp < w.max) w.hp = Math.min(w.max, w.hp + 4 * dt);
+      continue;
+    }
+    if (c.owner !== 'enemy') continue;
+    c.timer -= dt;
+    if (c.timer <= 0) {
+      c.timer = rnd(80, 120) * (1.2 - c.power * 0.2);
+      const n = 1 + Math.round(c.power);
+      for (let i = 0; i < n; i++) {
+        const a = rnd(0, TAU);
+        addEnemy(c, c.x + Math.cos(a) * 110, c.y + Math.sin(a) * 110, 'raid');
+      }
+      say('敌方营地派出一队劫掠者', 2.6);
+    }
+  }
+}
+
+function updateBuildings(dt) {
+  for (const b of G.buildings) {
+    if (b.type === 'tower') {
+      b.cd -= dt;
+      if (b.cd <= 0) {
+        const rng = 360 * (G.weather === 'rain' ? 0.75 : G.weather === 'fog' ? 0.62 : 1);
+        const tgt = nearestFrom(hostilesForMine(), b.x, b.y, rng);
+        if (tgt) {
+          b.cd = b.branch === 'rapid' ? 0.95 : b.branch === 'heavy' ? 2.6 : 1.9;
+          const dmg = b.branch === 'rapid' ? 1.0 : b.branch === 'heavy' ? 4.6 : 1.6;
+          G.arrows.push({ x: b.x, y: b.y - 42, tx: tgt.x, ty: tgt.y - 8, t: 0, dur: 0.3, mine: true });
+          if (tgt.kind) hurtMonster(tgt, dmg, 'arrow'); else { tgt.hp -= dmg; tgt.hurt = 0.16; }
+        }
+      }
+    } else if (b.type === 'farm') {
+      if (b.owner) {
+        const itv = b.branch === 'high' ? 2.0 : (G.safeDay ? 2.2 : 3.2);
+        b.t += dt;
+        if (b.t > itv) { b.t = 0; b.purse = Math.min(b.branch === 'high' ? 16 : 12, b.purse + 1); }
+      }
+      if (b.purse > 0 && dist(b.x, b.y, G.player.x, G.player.y) < 60) {
+        G.coins += b.purse; G.pops.push({ x: b.x, y: b.y - 34, t: 1, text: '+' + b.purse }); b.purse = 0;
+      }
+      if (b.branch === 'bomb') {
+        for (const e of G.monsters.concat(G.enemies)) {
+          if (dist(e.x, e.y, b.x, b.y) < 78) {
+            for (const e2 of G.monsters.concat(G.enemies)) if (dist(e2.x, e2.y, b.x, b.y) < 150) {
+              if (e2.kind) hurtMonster(e2, 90, 'melee'); else e2.hp -= 90;
+            }
+            G.fx.push({ type: 'ring', x: b.x, y: b.y, t: 0, dur: 0.8, color: '#ffb060' });
+            G.shake = 0.6; b.dead = true;
+            say('自爆农场引爆了！', 2);
+            break;
+          }
+        }
+      }
+    } else if (b.type === 'hospital') {
+      for (const u of G.units) if (u.hp < u.max && dist(u.x, u.y, b.x, b.y) < 210)
+        u.hp = Math.min(u.max, u.hp + 3 * dt);
+    } else if (b.type === 'barracks') {
+      b.cd -= dt;
+      if (b.cd <= 0) {
+        const knights = G.units.filter(u => u.role === 'knight').length;
+        if (knights < 2 * G.buildings.filter(x => x.type === 'barracks').length) {
+          b.cd = 20;
+          addUnit(b.x + rnd(-30, 30), b.y + rnd(20, 50), 'knight');
+          G.pops.push({ x: b.x, y: b.y - 40, t: 1, text: '新骑士' });
+        } else b.cd = 6;
+      }
+    } else if (b.type === 'trap') {
+      b.cd -= dt;
+      if (b.cd <= 0) {
+        for (const e of G.monsters.concat(G.enemies)) {
+          if (dist(e.x, e.y, b.x, b.y) < 30) {
+            if (e.kind) hurtMonster(e, 7, 'melee'); else e.hp -= 7;
+            e.speed = e.speed ? e.speed * 0.6 : 30; b.cd = 1.2;
+            G.fx.push({ type: 'star', x: b.x, y: b.y - 6, t: 0, dur: 0.3, color: '#e8e0c8' });
+            break;
+          }
+        }
+      }
+    }
+  }
+  G.buildings = G.buildings.filter(b => !b.dead);
+}
+
+function updateProjects(dt) {
+  const workers = G.units.filter(u => u.role === 'worker').length;
+  for (const p of G.projects) p.prog += dt * Math.min(2.5, 0.6 + workers * 0.55);
+  const done = G.projects.filter(p => p.prog >= p.dur);
+  for (const p of done) {
+    G.projects.splice(G.projects.indexOf(p), 1);
+    finishProject(p);
+  }
+}
+
+// ================================================================ 渲染
+function makeGrass() {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#7ec470'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 70; i++) {
+    g.fillStyle = Math.random() < 0.5 ? '#74bb68' : '#8bd07c';
+    const x = Math.random() * 256, y = Math.random() * 256, r = 8 + Math.random() * 26;
+    g.beginPath(); g.ellipse(x, y, r, r * 0.68, 0, 0, TAU); g.fill();
+  }
+  return c;
+}
+let grassPat = null;
+
+const cam = { x: 0, y: 0 };
+function draw() {
+  if (!grassPat) grassPat = ctx.createPattern(makeGrass(), 'repeat');
+  const sh = G.shake > 0 ? rnd(-1, 1) * G.shake * 7 : 0;
+  cam.x = clamp(G.player.x - W / 2, 0, Math.max(0, WORLD.w - W));
+  cam.y = clamp(G.player.y - H / 2, 0, Math.max(0, WORLD.h - H));
+  const ox = -cam.x + sh, oy = -cam.y + sh;
+  ctx.fillStyle = '#6fae66'; ctx.fillRect(0, 0, W, H);
+  ctx.save(); ctx.translate(ox % 256, oy % 256);
+  ctx.fillStyle = grassPat; ctx.fillRect(-256, -256, W + 512, H + 512); ctx.restore();
+
+  drawTrees(ox, oy);
+  drawCampStructures(ox, oy);
+  drawKeepWalls(ox, oy);
+  drawKeep(KEEP.x + ox, KEEP.y + oy);
+  for (const b of G.buildings) drawBuilding(b, b.x + ox, b.y + oy);
+  for (const p of G.projects) drawProject(p, p.x + ox, p.y + oy);
+  for (const u of G.units) drawUnit(u, u.x + ox, u.y + oy);
+  for (const e of G.enemies) drawEnemy(e, e.x + ox, e.y + oy);
+  for (const m of G.monsters) drawMonster(m, m.x + ox, m.y + oy);
+  drawPlayer(G.player.x + ox, G.player.y + oy);
+  drawArrows(ox, oy);
+  for (const c of G.coinsW) {
+    ctx.fillStyle = '#f8d05a'; ctx.beginPath(); ctx.arc(c.x + ox, c.y + oy, 7, 0, TAU); ctx.fill();
+    ctx.strokeStyle = '#8a6a1e'; ctx.lineWidth = 2; ctx.stroke();
+  }
+  for (const f of G.fx) drawFx(f, f.x + ox, f.y + oy);
+  ctx.textAlign = 'center'; ctx.font = 'bold 14px sans-serif';
+  for (const p of G.pops) {
+    ctx.fillStyle = 'rgba(255,240,190,' + Math.min(1, p.t * 1.4) + ')';
+    ctx.fillText(p.text, p.x + ox, p.y + oy);
+  }
+  if (G.phase === 'night') { ctx.fillStyle = 'rgba(18,24,58,.42)'; ctx.fillRect(0, 0, W, H); }
+  drawWeather();
+  if (G.state === 'win' || G.state === 'lose') drawEnd();
+}
+
+function drawTrees(ox, oy) {
+  for (const t of G.trees) {
+    const x = t.x + ox, y = t.y + oy;
+    if (x < -70 || x > W + 70 || y < -90 || y > H + 70) continue;
+    ctx.fillStyle = 'rgba(40,70,40,.22)';
+    ctx.beginPath(); ctx.ellipse(x + 4, y + 14 * t.s, 24 * t.s, 8 * t.s, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#7a5738'; ctx.fillRect(x - 4 * t.s, y - 4 * t.s, 8 * t.s, 16 * t.s);
+    if (t.v) {
+      ctx.fillStyle = '#4c8a58';
+      for (let i = 0; i < 3; i++) {
+        const w = (26 - i * 7) * t.s, hh = (20 - i * 4) * t.s, yy = y - (10 + i * 13) * t.s;
+        ctx.beginPath(); ctx.moveTo(x - w, yy); ctx.lineTo(x + w, yy); ctx.lineTo(x, yy - hh); ctx.closePath(); ctx.fill();
+      }
+    } else {
+      ctx.fillStyle = '#4f8f5c';
+      ctx.beginPath(); ctx.ellipse(x, y - 20 * t.s, 22 * t.s, 20 * t.s, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#5fa46a';
+      ctx.beginPath(); ctx.ellipse(x - 9 * t.s, y - 12 * t.s, 13 * t.s, 11 * t.s, 0, 0, TAU); ctx.fill();
+    }
+  }
+}
+
+function drawWallSet(walls, color, ox, oy) {
+  for (const w of walls) {
+    if (w.hp <= 0) continue;
+    const r = clamp(w.hp / w.max, 0, 1);
+    const x1 = w.x1 + ox, y1 = w.y1 + oy, x2 = w.x2 + ox, y2 = w.y2 + oy;
+    const th = 11 + 3 * (w.level || 1);
+    ctx.strokeStyle = 'rgba(40,30,22,.35)'; ctx.lineWidth = th + 8;
+    ctx.beginPath(); ctx.moveTo(x1, y1 + 4); ctx.lineTo(x2, y2 + 4); ctx.stroke();
+    ctx.strokeStyle = color; ctx.lineWidth = th;
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,240,210,.35)'; ctx.lineWidth = Math.max(2, th - 8);
+    ctx.beginPath(); ctx.moveTo(x1, y1 - 2); ctx.lineTo(x2, y2 - 2); ctx.stroke();
+    if (r < 1) {
+      ctx.strokeStyle = 'rgba(60,30,26,.85)'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x1 + (x2 - x1) * r, y1 + (y2 - y1) * r); ctx.stroke();
+    }
+  }
+}
+function drawKeepWalls(ox, oy) { drawWallSet(G.walls, '#b98a5e', ox, oy); }
+
+function drawCampStructures(ox, oy) {
+  for (const c of G.camps) {
+    const x = c.x + ox, y = c.y + oy;
+    if (x < -260 || x > W + 260 || y < -260 || y > H + 260) continue;
+    drawWallSet(c.walls, c.owner === 'mine' ? '#c9a24a' : (c.id === 0 ? '#a8705e' : '#7d6ea8'), ox, oy);
+    // 地面
+    ctx.fillStyle = c.owner === 'mine' ? 'rgba(240,206,110,.22)' : 'rgba(150,90,90,.22)';
+    ctx.beginPath(); ctx.ellipse(x, y, 130, 100, 0, 0, TAU); ctx.fill();
+    // 主营
+    const col = c.owner === 'mine' ? '#d8b24a' : (c.id === 0 ? '#a8493c' : '#5c4a86');
+    ctx.fillStyle = col; ctx.strokeStyle = '#2f2a24'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(x - 52, y + 8); ctx.lineTo(x, y - 56); ctx.lineTo(x + 52, y + 8); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#3a2f26'; ctx.fillRect(x - 16, y + 6, 32, 26);
+    // 旗
+    ctx.strokeStyle = '#2f2a24'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(x, y - 56); ctx.lineTo(x, y - 92); ctx.stroke();
+    ctx.fillStyle = c.owner === 'mine' ? '#ffe08a' : '#e07060';
+    ctx.beginPath(); ctx.moveTo(x + 1, y - 90); ctx.lineTo(x + 28, y - 80); ctx.lineTo(x + 1, y - 70); ctx.closePath(); ctx.fill();
+    // 血条
+    if (c.owner !== 'ruin') {
+      const r = clamp(c.hp / c.max, 0, 1);
+      ctx.fillStyle = 'rgba(30,22,20,.7)'; ctx.fillRect(x - 60, y + 46, 120, 9);
+      ctx.fillStyle = c.owner === 'mine' ? '#8ad07a' : '#e07060'; ctx.fillRect(x - 59, y + 47, 118 * r, 7);
+    } else {
+      ctx.fillStyle = 'rgba(60,50,44,.7)';
+      ctx.beginPath(); ctx.ellipse(x, y, 60, 30, 0, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#d8d0c0'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('废墟·插旗', x, y + 5);
+    }
+    if (c.owner === 'mine' && c.purse > 0) {
+      ctx.fillStyle = '#f8d05a'; ctx.beginPath(); ctx.arc(x, y - 40, 10, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#6a4a10'; ctx.font = 'bold 12px sans-serif'; ctx.fillText(c.purse, x, y - 36);
+    }
+  }
+}
+
+function drawKeep(x, y) {
+  const lvl = Math.max(...G.walls.map(w => w.level));
+  const r = clamp(G.keepHp / G.keepMax, 0, 1);
+  ctx.fillStyle = 'rgba(40,60,40,.25)';
+  ctx.beginPath(); ctx.ellipse(x, y + 36, 80, 20, 0, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#e8ddc2'; ctx.strokeStyle = '#2f2a24'; ctx.lineWidth = 4;
+  rrect(x - 58, y - 36, 116, 72, 6); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#c85a48';
+  ctx.beginPath(); ctx.moveTo(x - 72, y - 36); ctx.lineTo(x, y - 90); ctx.lineTo(x + 72, y - 36); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#8a5f3c'; ctx.fillRect(x - 13, y + 2, 26, 34);
+  if (lvl >= 2) { ctx.fillStyle = '#f6ce5c'; ctx.fillRect(x - 64, y - 76, 5, 24); ctx.fillRect(x + 59, y - 76, 5, 24); }
+  ctx.strokeStyle = '#2f2a24'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.moveTo(x, y - 90); ctx.lineTo(x, y - 122); ctx.stroke();
+  ctx.fillStyle = '#f6ce5c';
+  ctx.beginPath(); ctx.moveTo(x + 1, y - 120); ctx.lineTo(x + 28, y - 110); ctx.lineTo(x + 1, y - 100); ctx.closePath(); ctx.fill();
+  // 血量
+  ctx.fillStyle = 'rgba(30,22,20,.72)'; rrect(x - 66, y + 48, 132, 10, 5); ctx.fill();
+  ctx.fillStyle = r < 0.35 ? '#e05a4a' : r < 0.65 ? '#e0a24a' : '#8ad07a';
+  rrect(x - 65, y + 49, 130 * r, 8, 4); ctx.fill();
+}
+
+function drawBuilding(b, x, y) {
+  if (b.type === 'farm') {
+    ctx.fillStyle = '#8a6a44'; ctx.strokeStyle = '#2f2a24'; ctx.lineWidth = 3;
+    rrect(x - 44, y - 22, 88, 44, 4); ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = b.branch === 'high' ? '#a8e07a' : '#7ac46a'; ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.moveTo(x - 36 + i * 22, y - 15); ctx.lineTo(x - 36 + i * 22, y + 15); ctx.stroke(); }
+    if (b.branch === 'bomb') { ctx.fillStyle = '#3a3230'; ctx.beginPath(); ctx.arc(x, y - 4, 11, 0, TAU); ctx.fill(); }
+    if (b.purse > 0) { ctx.fillStyle = '#f8d05a'; ctx.beginPath(); ctx.arc(x, y - 34, 10, 0, TAU); ctx.fill();
+      ctx.fillStyle = '#6a4a10'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(b.purse, x, y - 30); }
+  } else if (b.type === 'tower') {
+    ctx.fillStyle = '#cfcac0'; ctx.strokeStyle = '#2f2a24'; ctx.lineWidth = 3;
+    rrect(x - 20, y - 44, 40, 62, 4); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#c8473a';
+    ctx.beginPath(); ctx.moveTo(x - 27, y - 44); ctx.lineTo(x, y - 70); ctx.lineTo(x + 27, y - 44); ctx.closePath(); ctx.fill();
+    if (b.branch === 'rapid') { ctx.strokeStyle = '#f3e7c8'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x - 7, y - 46); ctx.lineTo(x - 7, y - 58); ctx.moveTo(x + 7, y - 46); ctx.lineTo(x + 7, y - 58); ctx.stroke(); }
+    if (b.branch === 'heavy') { ctx.strokeStyle = '#f3e7c8'; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(x, y - 46); ctx.lineTo(x, y - 62); ctx.stroke(); }
+  } else if (b.type === 'statue') {
+    ctx.fillStyle = '#9a9488'; ctx.strokeStyle = '#2f2a24'; ctx.lineWidth = 3;
+    rrect(x - 16, y - 8, 32, 22, 3); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#cfc8b8';
+    ctx.beginPath(); ctx.arc(x, y - 26, 13, 0, TAU); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,226,140,.18)';
+    ctx.beginPath(); ctx.arc(x, y - 10, 120, 0, TAU); ctx.fill();
+  } else if (b.type === 'barracks') {
+    ctx.fillStyle = '#7e6046'; ctx.strokeStyle = '#2f2a24'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(x - 38, y + 18); ctx.lineTo(x, y - 34); ctx.lineTo(x + 38, y + 18); ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#3a2c22'; ctx.fillRect(x - 12, y - 2, 24, 20);
+    ctx.strokeStyle = '#c8ccd6'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(x + 24, y - 26); ctx.lineTo(x + 24, y - 54); ctx.stroke();
+  } else if (b.type === 'hospital') {
+    ctx.fillStyle = '#f0ece4'; ctx.strokeStyle = '#2f2a24'; ctx.lineWidth = 3;
+    rrect(x - 32, y - 28, 64, 46, 5); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#d2554a'; ctx.fillRect(x - 5, y - 22, 10, 30); ctx.fillRect(x - 17, y - 10, 34, 10);
+  } else if (b.type === 'trap') {
+    ctx.fillStyle = '#48423a';
+    ctx.beginPath(); ctx.ellipse(x, y, 28, 12, 0, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#d2d0c8';
+    for (let i = 0; i < 5; i++) {
+      const tx = x - 22 + i * 11;
+      ctx.beginPath(); ctx.moveTo(tx - 5, y + 4); ctx.lineTo(tx, y - 14); ctx.lineTo(tx + 5, y + 4); ctx.closePath(); ctx.fill();
+    }
+  }
+}
+
+function drawProject(p, x, y) {
+  ctx.strokeStyle = 'rgba(230,200,140,.85)'; ctx.lineWidth = 3;
+  ctx.beginPath(); ctx.arc(x, y, 26, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(p.prog / p.dur, 0, 1)); ctx.stroke();
+  ctx.fillStyle = 'rgba(120,96,64,.55)'; rrect(x - 14, y - 14, 28, 28, 4); ctx.fill();
+  ctx.fillStyle = '#f3e7c8'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText({ wall: '墙', expand: '扩建', farm: '农场', tower: '箭塔', statue: '雕像',
+    barracks: '兵营', hospital: '医院', trap: '陷阱' }[p.kind], x, y + 30);
+}
+
+function drawUnit(u, x, y) {
+  const vet = u.veteran;
+  const bob = u.moving ? -Math.abs(Math.sin(u.walk)) * 1.7 : Math.sin(G.t * 2 + u.bob) * 0.7;
+  const c = u.hurt > 0 ? '#ffe6e6' : ROLE[u.role].color;
+  if (u.onWall) {
+    ctx.fillStyle = '#96693e'; rrect(x - 16, y + 7, 32, 8, 3); ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(40,60,40,.22)';
+  ctx.beginPath(); ctx.ellipse(x, y + 14, 12, 4.5, 0, 0, TAU); ctx.fill();
+  rrect(x - 10, y - 8 + bob, 20, 20, 7);
+  ctx.fillStyle = c; ctx.strokeStyle = '#2f2a24'; ctx.lineWidth = 2; ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#f8dcbc';
+  ctx.beginPath(); ctx.arc(x + u.face * 0.8, y - 13 + bob, 9, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#2f2a24';
+  ctx.beginPath(); ctx.arc(x + u.face * 1 - 3, y - 15 + bob, 1.7, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + u.face * 1 + 3, y - 15 + bob, 1.7, 0, TAU); ctx.fill();
+  if (vet) {
+    ctx.strokeStyle = '#ffd976'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, y - 16 + bob, 10, Math.PI, TAU); ctx.stroke();
+    ctx.fillStyle = '#ffe08a'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('★', x, y - 28 + bob);
+  }
+  // 武器
+  ctx.strokeStyle = '#8a6a3e'; ctx.lineWidth = 3;
+  if (u.role === 'hunter') {
+    ctx.strokeStyle = '#7a5a3a'; ctx.lineWidth = 2.5;
+    const pull = u.atk > 0 ? 4 : 0;
+    ctx.beginPath(); ctx.arc(x + u.face * 13, y - 6 + bob, 10, -1.2, 1.2); ctx.stroke();
+    ctx.strokeStyle = '#efe6cc'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x + u.face * 16, y - 15 + bob);
+    ctx.lineTo(x + u.face * (10 - pull), y - 6 + bob);
+    ctx.lineTo(x + u.face * 16, y + 3 + bob); ctx.stroke();
+  } else if (u.role === 'knight') {
+    ctx.strokeStyle = '#c8ccd6'; ctx.lineWidth = 3;
+    const ang = u.swing > 0 ? -0.4 + (1 - u.swing / 0.2) * 1.6 : -0.9;
+    ctx.beginPath(); ctx.moveTo(x + u.face * 10, y - 4 + bob);
+    ctx.lineTo(x + u.face * (10 + Math.cos(ang) * 15), y - 4 + bob + Math.sin(ang) * 15); ctx.stroke();
+    if (u.swing > 0) { ctx.strokeStyle = 'rgba(255,246,200,.85)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(x, y - 4 + bob, 20, -0.9, 0.9); ctx.stroke(); }
+  } else if (u.role === 'worker' || u.role === 'lumber') {
+    ctx.beginPath(); ctx.moveTo(x + u.face * 12, y - 2 + bob);
+    ctx.lineTo(x + u.face * 20, y - 14 + bob); ctx.stroke();
+    ctx.fillStyle = '#b8bcc6'; ctx.fillRect(x + u.face * 17, y - 20 + bob, 8, 7);
+  } else if (u.role === 'farmer') {
+    ctx.beginPath(); ctx.moveTo(x + u.face * 11, y + 3 + bob); ctx.lineTo(x + u.face * 19, y - 15 + bob); ctx.stroke();
+  }
+  if (u.purse > 0) { ctx.fillStyle = '#f8d05a'; ctx.beginPath(); ctx.arc(x, y - 32 + bob, 4.5, 0, TAU); ctx.fill(); }
+}
+
+function drawEnemy(e, x, y) {
+  const bob = e.moving ? -Math.abs(Math.sin(e.walk)) * 1.6 : Math.sin(G.t * 2 + e.bob) * 0.7;
+  ctx.fillStyle = 'rgba(40,20,20,.22)';
+  ctx.beginPath(); ctx.ellipse(x, y + 14, 12, 4.5, 0, 0, TAU); ctx.fill();
+  rrect(x - 10, y - 8 + bob, 20, 20, 7);
+  ctx.fillStyle = e.hurt > 0 ? '#ffdede' : '#a85448'; ctx.strokeStyle = '#3a2420'; ctx.lineWidth = 2;
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#f0c8a8';
+  ctx.beginPath(); ctx.arc(x, y - 13 + bob, 9, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#2a1c18';
+  ctx.beginPath(); ctx.arc(x - 3, y - 15 + bob, 1.7, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 3, y - 15 + bob, 1.7, 0, TAU); ctx.fill();
+  if (e.hp < e.max) {
+    ctx.fillStyle = 'rgba(30,20,20,.7)'; ctx.fillRect(x - 13, y - 30 + bob, 26, 4);
+    ctx.fillStyle = '#e07060'; ctx.fillRect(x - 12, y - 29 + bob, 24 * e.hp / e.max, 2);
+  }
+}
+
+function drawMonster(m, x, y) {
+  const bob = Math.sin(m.bob) * 2 + (m.atk > 0 ? -2 : 0);
+  const body = { imp: '#9660a8', brute: '#684078', thrower: '#8070b0',
+    bomber: '#604a60', shield: '#78706a', flyer: '#b078c0' }[m.kind];
+  ctx.fillStyle = 'rgba(40,20,40,.25)';
+  ctx.beginPath(); ctx.ellipse(x, y + 14, m.r * 0.9, 6, 0, 0, TAU); ctx.fill();
+  if (m.kind === 'flyer') {
+    const flap = Math.sin(G.t * 14) * 6;
+    ctx.fillStyle = '#cfa8d8';
+    ctx.beginPath(); ctx.moveTo(x - 8, y - 10); ctx.lineTo(x - 30, y - 18 - flap); ctx.lineTo(x - 10, y + 2); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(x + 8, y - 10); ctx.lineTo(x + 30, y - 18 - flap); ctx.lineTo(x + 10, y + 2); ctx.closePath(); ctx.fill();
+  }
+  ctx.fillStyle = m.flash > 0 ? '#f4cef4' : body;
+  ctx.strokeStyle = '#2f2233'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.ellipse(x, y - 2 + bob, m.r, m.r * 0.88, 0, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#fff6d8';
+  ctx.beginPath(); ctx.arc(x - 6, y - 6 + bob, 4, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 6, y - 6 + bob, 4, 0, TAU); ctx.fill();
+  ctx.fillStyle = '#2f2233';
+  ctx.beginPath(); ctx.arc(x - 5, y - 6 + bob, 2, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 7, y - 6 + bob, 2, 0, TAU); ctx.fill();
+  if (m.kind === 'shield') { ctx.fillStyle = '#9a9088'; ctx.fillRect(x - 20, y - 12 + bob, 8, 22); }
+  if (m.kind === 'brute') { ctx.fillStyle = '#3a2440';
+    ctx.beginPath(); ctx.moveTo(x - 12, y - 14 + bob); ctx.lineTo(x - 6, y - 26 + bob); ctx.lineTo(x - 2, y - 14 + bob); ctx.closePath(); ctx.fill(); }
+  if (m.hp < m.max && m.hpFlash > 0) {
+    ctx.fillStyle = 'rgba(30,20,30,.75)'; ctx.fillRect(x - 18, y - 32 + bob, 36, 5);
+    ctx.fillStyle = '#ec7878'; ctx.fillRect(x - 17, y - 31 + bob, 34 * clamp(m.hp / m.max, 0, 1), 3);
+  }
+}
+
+function drawPlayer(x, y) {
+  const bob = Math.abs(Math.sin(G.player.walk)) * -1.6;
+  ctx.fillStyle = 'rgba(40,60,40,.25)';
+  ctx.beginPath(); ctx.ellipse(x, y + 15, 13, 5, 0, 0, TAU); ctx.fill();
+  rrect(x - 11, y - 8 + bob, 22, 22, 8);
+  ctx.fillStyle = '#5c7ab0'; ctx.strokeStyle = '#2f2a24'; ctx.lineWidth = 2.5; ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#fadcb4';
+  ctx.beginPath(); ctx.arc(x, y - 14 + bob, 10, 0, TAU); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = '#f6ce5c'; ctx.strokeStyle = '#8a6a1e'; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(x - 10, y - 22 + bob); ctx.lineTo(x - 6, y - 31 + bob); ctx.lineTo(x - 2, y - 22 + bob);
+  ctx.lineTo(x + 2, y - 31 + bob); ctx.lineTo(x + 6, y - 22 + bob); ctx.lineTo(x + 10, y - 31 + bob);
+  ctx.lineTo(x + 12, y - 22 + bob); ctx.closePath(); ctx.fill(); ctx.stroke();
+}
+
+function drawArrows(ox, oy) {
+  ctx.strokeStyle = '#efe6c8'; ctx.lineWidth = 2;
+  for (const a of G.arrows) {
+    const k = clamp(a.t / a.dur, 0, 1);
+    const x = a.x + (a.tx - a.x) * k + ox, y = a.y + (a.ty - a.y) * k + oy;
+    const k2 = Math.max(0, k - 0.16);
+    const px = a.x + (a.tx - a.x) * k2 + ox, py = a.y + (a.ty - a.y) * k2 + oy;
+    ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(x, y); ctx.stroke();
+  }
+}
+
+function drawFx(f, x, y) {
+  const k = f.t / f.dur;
+  ctx.globalAlpha = 1 - k;
+  if (f.type === 'ring') {
+    ctx.strokeStyle = f.color; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, y, 10 + k * 46, 0, TAU); ctx.stroke();
+  } else {
+    ctx.strokeStyle = f.color; ctx.lineWidth = 2.5;
+    for (let i = 0; i < 8; i++) {
+      const a = i / 8 * TAU, r1 = 4 + k * 8, r2 = 10 + k * 20;
+      ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r1, y + Math.sin(a) * r1);
+      ctx.lineTo(x + Math.cos(a) * r2, y + Math.sin(a) * r2); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawWeather() {
+  if (G.weather === 'rain') {
+    ctx.strokeStyle = 'rgba(190,210,240,.5)'; ctx.lineWidth = 1.5;
+    for (let i = 0; i < 70; i++) {
+      const x = (i * 97 + G.t * 420) % (W + 60) - 30;
+      const y = (i * 173 + G.t * 780) % (H + 60) - 30;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - 6, y + 16); ctx.stroke();
+    }
+  } else if (G.weather === 'snow') {
+    ctx.fillStyle = 'rgba(255,255,255,.75)';
+    for (let i = 0; i < 60; i++) {
+      const x = (i * 131 + Math.sin(G.t + i) * 20) % W;
+      const y = (i * 197 + G.t * 90) % H;
+      ctx.beginPath(); ctx.arc(x, y, 2, 0, TAU); ctx.fill();
+    }
+  } else if (G.weather === 'fog') {
+    const g = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.24, W / 2, H / 2, Math.max(W, H) * 0.72);
+    g.addColorStop(0, 'rgba(214,218,224,0)');
+    g.addColorStop(1, 'rgba(214,218,224,.62)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+}
+
+function drawEnd() {
+  ctx.fillStyle = 'rgba(12,10,14,.8)'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center';
+  const win = G.state === 'win';
+  ctx.fillStyle = '#ffe9c0'; ctx.font = 'bold 26px sans-serif';
+  ctx.fillText(win ? (G.surviveWin ? '守成结局：撑过了 30 天' : '征服结局：所有营地归你') : '覆灭结局：三顶王冠被抢', W / 2, H / 2 - 40);
+  ctx.font = '15px sans-serif'; ctx.fillStyle = '#d8cbb4';
+  const rows = ['存活 ' + G.day + ' 天', '击杀 ' + G.kills + ' · 阵亡 ' + G.lost,
+    '金币峰值 ' + G.peak, '占领营地 ' + G.camps.filter(c => c.owner === 'mine').length + ' / ' + G.camps.length];
+  rows.forEach((t, i) => ctx.fillText(t, W / 2, H / 2 + i * 26));
+  ctx.fillStyle = '#ffd976'; ctx.font = '15px sans-serif';
+  ctx.fillText('点这里或按 R 重开', W / 2, H / 2 + 130);
+}
+
+// ================================================================ 按钮与 HUD
+const BTNS = [
+  { t: '工人', c: 3,  fn: () => hire('worker') },
+  { t: '猎人', c: 4,  fn: () => hire('hunter') },
+  { t: '骑士', c: 6,  fn: () => hire('knight') },
+  { t: '农夫', c: 4,  fn: () => hire('farmer') },
+  { t: '伐木', c: 3,  fn: () => hire('lumber') },
+  { t: '城墙', c: 10, fn: () => startProject('wall') },
+  { t: '农场', c: 20, fn: () => startProject('farm') },
+  { t: '箭塔', c: 34, fn: () => startProject('tower') },
+  { t: '兵营', c: 40, fn: () => startProject('barracks') },
+  { t: '医院', c: 34, fn: () => startProject('hospital') },
+  { t: '陷阱', c: 14, fn: () => startProject('trap') },
+  { t: '扩建', c: 30, fn: () => startProject('expand') },
+  { t: '出击', c: 0,  fn: orderArmy },
+  { t: '插旗', c: 30, fn: plantFlag },
+  { t: '驻军', c: 9,  fn: garrison },
+  { t: '补员', c: 6,  fn: quickRecruit },
+  { t: '修墙', c: 10, fn: quickRepair },
+  { t: '重开', c: 0,  fn: () => { reset(); G.state = 'play'; } }
+];
+const btnBox = document.getElementById('btns');
+const btnEls = BTNS.map(b => {
+  const el = document.createElement('div');
+  el.className = 'btn';
+  el.innerHTML = b.t + '<span>' + (b.c ? b.c + ' 金' : '免费') + '</span>';
+  el.addEventListener('click', e => { e.preventDefault(); b.fn(); });
+  btnBox.appendChild(el);
+  return el;
+});
+
+const elCoin = document.getElementById('coin'), elCrowns = document.getElementById('crowns');
+const elDay = document.getElementById('day'), elPhase = document.getElementById('phase');
+const elWx = document.getElementById('wx'), elMsg = document.getElementById('msg'), elVet = document.getElementById('vet');
+
+let hudT = 0;
+function syncHud(dt) {
+  hudT += Math.max(dt, 0.016);
+  elMsg.textContent = G.msg;
+  elMsg.style.opacity = G.msgT > 0 ? 1 : 0;
+  if (hudT < 0.12) return;
+  hudT = 0;
+  elCoin.textContent = G.coins;
+  elCrowns.textContent = '★★★'.slice(0, Math.max(0, G.crowns)) + '☆☆☆'.slice(0, Math.max(0, 3 - G.crowns));
+  elDay.textContent = '第 ' + G.day + ' 天 ' + (G.phase === 'day' ? '白天' : '夜晚');
+  elPhase.textContent = Math.ceil(G.phaseT) + ' 秒 · 本营 ' + Math.round(G.keepHp / G.keepMax * 100) + '%';
+  elWx.textContent = WX[G.weather].name + ' · ' + WX[G.weather].desc;
+  const vets = G.units.filter(u => u.veteran).length;
+  elVet.textContent = vets ? '老兵 ' + vets : '';
+  const mine = G.camps.filter(c => c.owner === 'mine').length;
+  const total = G.camps.length;
+  elCrowns.title = '营地 ' + mine + '/' + total;
+  BTNS.forEach((b, i) => {
+    btnEls[i].style.opacity = (b.c > G.coins) ? 0.42 : 1;
+  });
+}
+
+// ================================================================ 音效（程序合成，可选）
+let AC = null;
+function beep(freq, dur, type, gain) {
+  try {
+    if (!AC) AC = new (window.AudioContext || window.webkitAudioContext)();
+    const o = AC.createOscillator(), g = AC.createGain();
+    o.type = type || 'sine'; o.frequency.value = freq;
+    g.gain.value = gain || 0.06;
+    o.connect(g); g.connect(AC.destination);
+    o.start(); g.gain.exponentialRampToValueAtTime(0.0001, AC.currentTime + (dur || 0.15));
+    o.stop(AC.currentTime + (dur || 0.15) + 0.02);
+  } catch (e) {}
+}
+const playHorn = () => { beep(147, 0.45, 'square', 0.05); setTimeout(() => beep(220, 0.4, 'square', 0.04), 120); };
+const playCoin = () => beep(1200, 0.08, 'sine', 0.05);
+const playHit = () => beep(180, 0.07, 'triangle', 0.05);
+
+const _nightStart = nightStart;
+nightStart = function () { playHorn(); _nightStart(); };
+
+// ================================================================ 主循环
+let last = performance.now();
+function loop(now) {
+  let dt = Math.min(0.05, (now - last) / 1000); last = now;
+  try {
+    update(dt);
+    draw();
+    syncHud(dt);
+  } catch (e) {
+    errBox.style.display = 'block';
+    errBox.textContent = 'ERR: ' + e.message + '\n' + (e.stack || '').split('\n').slice(1, 4).join('\n');
+  }
+  requestAnimationFrame(loop);
+}
+
+// ================================================================ 开始
+function start(mode) {
+  G.diff = mode;
+  G.scale = mode === 1 ? { hp: 0.7, income: 1.2 } : mode === 3 ? { hp: 1.35, income: 1.15 } : { hp: 1, income: 1 };
+  document.getElementById('start').style.display = 'none';
+  reset();
+  G.state = 'play';
+  say('白天招人，晚上守家', 3);
+}
+
+document.querySelectorAll('#start .mode').forEach(el => {
+  el.addEventListener('click', () => start(parseInt(el.dataset.d, 10)));
+});
+addEventListener('keydown', e => {
+  if (G.state === 'menu' && (e.key === 'Enter' || e.key === ' ')) start(2);
+  if ((G.state === 'win' || G.state === 'lose') && e.key.toLowerCase() === 'r') { reset(); G.state = 'play'; }
+  if (G.state === 'win' || G.state === 'lose') {
+    if (e.pointerType === undefined) { reset(); G.state = 'play'; }
+  }
+});
+cv.addEventListener('click', () => { if (G.state === 'win' || G.state === 'lose') { reset(); G.state = 'play'; } });
+
+reset();
+if (location.hash === '#play') start(2);
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

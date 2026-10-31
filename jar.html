@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PHI JAR · 参数化罐体（网页版）</title>
+<style>
+  :root{--bg:#efe7dc;--panel:#f7f1e8;--ink:#3c342e;--muted:#9b8e85;--line:#e0d4c6;
+        --accent:#b08968;--accent2:#8a9a8b}
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:var(--bg);color:var(--ink);font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    height:100vh;display:flex;overflow:hidden}
+  #side{width:308px;background:var(--panel);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;flex:0 0 308px}
+  #side h1{font-size:15px;letter-spacing:.12em;padding:14px 16px 2px}
+  #side .sub{font-size:11px;color:var(--muted);padding:0 16px 10px;border-bottom:1px solid var(--line)}
+  #scroll{overflow-y:auto;padding:10px 16px 8px;flex:1}
+  .group{font-size:10px;letter-spacing:.2em;color:var(--accent);margin:12px 0 6px}
+  .row{display:flex;justify-content:space-between;font-size:11.5px;margin-top:7px}
+  .row b{font-weight:400;color:var(--muted);font-family:Consolas,monospace}
+  input[type=range]{width:100%;height:16px;-webkit-appearance:none;background:transparent;margin:1px 0 0}
+  input[type=range]::-webkit-slider-runnable-track{height:3px;background:var(--line);border-radius:2px}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;margin-top:-5px;
+    border-radius:50%;background:var(--accent);border:2px solid var(--panel);box-shadow:0 1px 3px #0002}
+  .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:4px}
+  .chip{font-size:11px;padding:4px 9px;border:1px solid var(--line);border-radius:999px;cursor:pointer;
+    background:#fff8;user-select:none}
+  .chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .sw{display:flex;gap:5px;margin-top:5px}
+  .sw i{width:22px;height:22px;border-radius:6px;display:block;cursor:pointer;border:2px solid #0000}
+  .sw i.on{border-color:var(--ink)}
+  .btns{display:flex;flex-wrap:wrap;gap:6px;padding:10px 12px;border-top:1px solid var(--line)}
+  .btn{flex:1 1 30%;padding:8px 4px;border:0;border-radius:10px;background:#e8dbcb;color:var(--ink);
+    font-size:11.5px;cursor:pointer;white-space:nowrap}
+  .btn.primary{background:var(--accent);color:#fff}
+  #stage{flex:1;position:relative;display:flex;align-items:center;justify-content:center}
+  canvas{max-width:100%;max-height:100%;display:block}
+  #hint{position:absolute;left:14px;bottom:12px;font-size:11px;color:var(--muted)}
+  @media(max-width:760px){
+    body{flex-direction:column}
+    #side{width:100%;flex:0 0 auto;max-height:52vh}
+    #stage{flex:1}
+  }
+</style>
+</head>
+<body>
+
+<div id="side">
+  <h1>PHI JAR</h1>
+  <div class="sub">参数化罐体 · 网页版</div>
+  <div id="scroll"></div>
+  <div class="btns">
+    <button class="btn" id="phi">φ 锁定</button>
+    <button class="btn primary" id="save">保存 PNG</button>
+  </div>
+</div>
+
+<div id="stage">
+  <canvas id="cv"></canvas>
+  <div id="hint">拖动右侧画面可转视角 · 滚轮缩放</div>
+</div>
+
+<script>
+const P = {
+  body_h:118, body_w:112, belly:.10, shoulder_h:24, curve:1.25,
+  neck_w:64, neck_h:18, mouth_w:72, fillet:12, bead:1.2,
+  tilt:12, spin:0, light_az:315, light_el:45, light_power:1, zoom:1,
+  body_hex:'#f3ece0', mouth_hex:'#f7f0e5'
+};
+const SPECS = [
+  ['body_h','罐身高度',60,190,1,'mm'], ['body_w','罐身宽度',50,140,1,'mm'],
+  ['belly','腹部鼓起',0,.24,.01,''], ['shoulder_h','肩部高度',6,70,1,'mm'],
+  ['curve','肩部曲率',.5,2.2,.05,''], ['neck_w','脖子宽度',16,90,1,'mm'],
+  ['neck_h','脖子高度',6,80,1,'mm'], ['mouth_w','罐口宽度',18,100,1,'mm'],
+  ['fillet','底部圆角',2,20,1,'mm'], ['bead','口沿厚度',0,3,.1,'mm'],
+  ['tilt','俯视角度',0,40,1,'°'], ['spin','旋转',0,360,1,'°'],
+  ['light_az','光照方向',0,360,1,'°'], ['light_power','光照强度',.4,2,.05,'']
+];
+const PRESETS = {
+  '宽口罐':{body_h:118,body_w:112,belly:.10,shoulder_h:24,curve:1.25,neck_w:64,neck_h:18,mouth_w:72,fillet:12},
+  '梅森罐':{body_h:128,body_w:92,belly:0,shoulder_h:16,curve:1.45,neck_w:64,neck_h:22,mouth_w:66,fillet:8},
+  '牛奶瓶':{body_h:118,body_w:76,belly:.02,shoulder_h:54,curve:.55,neck_w:34,neck_h:54,mouth_w:44,fillet:22},
+  '姜罐':{body_h:86,body_w:108,belly:.18,shoulder_h:26,curve:1.35,neck_w:58,neck_h:10,mouth_w:64,fillet:6},
+  '香水瓶':{body_h:88,body_w:66,belly:0,shoulder_h:16,curve:1.4,neck_w:14,neck_h:40,mouth_w:18,fillet:3},
+  '酒瓶':{body_h:118,body_w:76,belly:0,shoulder_h:52,curve:.62,neck_w:28,neck_h:60,mouth_w:30,fillet:12}
+};
+const SWATCH = ['#f3ece0','#dcc9b6','#c9ada7','#a3b18a','#8fa3ad','#b7a6b8','#8d8177','#d8b08c','#c97b63','#5f6b5a'];
+let colorTarget = 'body';
+
+/* ---------- 曲线 ---------- */
+function smoothstep(t){return t*t*t*(t*(t*6-15)+10);}
+function buildProfile(p, N=260){
+  const bodyR=p.body_w/2, neckR=p.neck_w/2, mouthR=p.mouth_w/2;
+  const bodyH=p.body_h, shoulder=p.shoulder_h, neckH=p.neck_h, belly=p.belly;
+  const curve=Math.max(.4,p.curve), fillet=Math.min(p.fillet, bodyH*.45, bodyR*.45);
+  const lipH=Math.max(3, neckH*.14), roll=Math.max(.6, Math.abs(mouthR-neckR)*.18);
+  const total=bodyH+shoulder+neckH+lipH;
+  const ys=new Float32Array(N), rs=new Float32Array(N);
+  for(let i=0;i<N;i++){
+    const y=total*i/(N-1); let r;
+    if(y<fillet){const t=(fillet-y)/fillet; r=bodyR-fillet+Math.sqrt(Math.max(fillet*fillet-t*t*fillet*fillet,0));}
+    else if(y<bodyH) r=bodyR;
+    else if(y<bodyH+shoulder){const t=(y-bodyH)/Math.max(shoulder,1e-6); r=bodyR+(neckR-bodyR)*Math.pow(smoothstep(t),curve);}
+    else if(y<bodyH+shoulder+neckH) r=neckR;
+    else{
+      const t=(y-(bodyH+shoulder+neckH))/lipH;
+      if(t<.58) r=neckR+(mouthR-neckR)*smoothstep(t/.58);
+      else {const k=(t-.58)/.42; r=mouthR-roll*k*k;}
+    }
+    if(y>total-lipH*1.6 && p.bead>0){
+      r+=p.bead*Math.exp(-Math.pow((y-(total-lipH*.55))/(lipH*.5),2));
+      r=Math.min(r, mouthR+p.bead*.85);
+    }
+    if(y<=bodyH && belly>0) r*=1+belly*Math.pow(Math.sin(Math.PI*Math.min(y,bodyH)/bodyH),2);
+    ys[i]=y; rs[i]=Math.max(r,1);
+  }
+  // 三次平滑
+  for(let k=0;k<3;k++){
+    const o=Float32Array.from(rs);
+    for(let i=0;i<N;i++) rs[i]=(o[Math.max(0,i-1)]+2*o[i]+o[Math.min(N-1,i+1)])/4;
+  }
+  let maxR=0; for(let i=0;i<N;i++) maxR=Math.max(maxR,rs[i]);
+  return {ys, rs, total, maxR};
+}
+
+function hex2rgb(h){h=h.replace('#','');return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
+
+/* ---------- 渲染 ---------- */
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+function render(quality=1){
+  const dpr=Math.min(2,window.devicePixelRatio||1);
+  const stage=document.getElementById('stage');
+  const W=Math.max(360,Math.floor(stage.clientWidth*quality));
+  const H=Math.max(360,Math.floor(stage.clientHeight*quality));
+  if(cv.width!==W*dpr||cv.height!==H*dpr){cv.width=W*dpr;cv.height=H*dpr;}
+  cv.style.width=(W/quality)+'px'; cv.style.height=(H/quality)+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+
+  const p=buildProfile(P);
+  const tilt=P.tilt*Math.PI/180, ct=Math.cos(tilt), st=Math.sin(tilt);
+  const scale=Math.min(H*.78/Math.max(p.total*ct,1), W*.82/(2*p.maxR))*P.zoom;
+  const baseY=H*.89, cx=W*.5;
+
+  // 背景
+  const bg=ctx.createLinearGradient(0,0,0,H);
+  bg.addColorStop(0,'#fbf5ec'); bg.addColorStop(1,'#eee0cf');
+  ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+
+  const img=ctx.getImageData(0,0,W,H), data=img.data;
+  const bodyTint=hex2rgb(P.body_hex).map(v=>v/255);
+  const az=P.light_az*Math.PI/180, el=P.light_el*Math.PI/180;
+  let Lx=Math.sin(az)*Math.cos(el), Ly=Math.sin(el), Lz=Math.cos(az)*Math.cos(el);
+  const spin=P.spin*Math.PI/180;
+  const lx=Lx*Math.cos(-spin)-Lz*Math.sin(-spin), lz=Lx*Math.sin(-spin)+Lz*Math.cos(-spin);
+  Lx=lx; Lz=lz;
+  const specPow=30, specStr=110*P.light_power, amb=.34, dif=.74;
+
+  // 逐行
+  for(let py=0;py<H;py++){
+    const wy=(baseY-py)/scale/Math.max(ct,1e-3);
+    if(wy<0||wy>p.total) continue;
+    // 圆弧插值
+    let lo=0,hi=p.ys.length-1;
+    while(lo<hi-1){const mid=(lo+hi)>>1; if(p.ys[mid]<=wy) lo=mid; else hi=mid;}
+    const t=(wy-p.ys[lo])/Math.max(p.ys[hi]-p.ys[lo],1e-6);
+    const r=p.rs[lo]*(1-t)+p.rs[hi]*t;
+    const dr=(p.rs[hi]-p.rs[lo])/Math.max(p.ys[hi]-p.ys[lo],1e-6);
+    if(r<=0) continue;
+    const rp=r*scale;
+    const x0=Math.max(0,Math.floor(cx-rp)), x1=Math.min(W-1,Math.ceil(cx+rp));
+    for(let px=x0;px<=x1;px++){
+      const X=(px-cx)/scale;
+      if(Math.abs(X)>r) continue;
+      const Z=Math.sqrt(Math.max(r*r-X*X,1e-6));
+      let nx=X, ny=-r*dr, nz=Z;
+      const inv=1/Math.hypot(nx,ny,nz); nx*=inv; ny*=inv; nz*=inv;
+      const diff=Math.max(0,nx*Lx+ny*Ly+nz*Lz)*P.light_power;
+      const hx=Lx, hy=Ly, hz=Lz+1; const hl=Math.hypot(hx,hy,hz);
+      const sp=Math.pow(Math.max(0,(nx*hx+ny*hy+nz*hz)/hl),specPow)*specStr;
+      const fres=Math.pow(1-nz,3)*26;
+      const edge=Math.min(1,(r-Math.abs(X))*scale);
+      const ao=1-.40*Math.pow(1-edge,2);
+      const k=((amb+dif*diff)*ao);
+      const i4=(py*W+px)*4;
+      data[i4]  =Math.min(255, 243*k*bodyTint[0]+sp+fres*.9);
+      data[i4+1]=Math.min(255, 236*k*bodyTint[1]+sp+fres*.86);
+      data[i4+2]=Math.min(255, 224*k*bodyTint[2]+sp+fres*.8);
+      data[i4+3]=255;
+    }
+  }
+  ctx.putImageData(img,0,0);
+
+  // 罐口
+  const rx=(P.mouth_w/2)*scale*.96, ry=Math.max(rx*st, rx*.09);
+  if(rx>4){
+    const yTop=baseY-p.total*ct*scale;
+    const lip=Math.max(2,Math.round(rx*.05));
+    const lipRGB=hex2rgb(P.mouth_hex);
+    const deep=lipRGB.map((v,i)=>Math.max(0,v*.16+[34,22,14][i]));
+    const mid=lipRGB.map((v,i)=>Math.max(0,v*.28+[44,29,18][i]));
+    const hiC=lipRGB.map(v=>Math.max(0,v*.44+17));
+    ctx.save();
+    ctx.beginPath(); ctx.ellipse(cx,yTop,rx,ry,0,0,Math.PI*2); ctx.fillStyle=`rgb(${deep})`; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx,yTop,rx*.88,ry*.86,0,0,Math.PI*2); ctx.fillStyle=`rgb(${mid})`; ctx.fill();
+    ctx.beginPath(); ctx.ellipse(cx,yTop,rx*.72,ry*.72,0,0,Math.PI*2); ctx.fillStyle=`rgb(${hiC})`; ctx.fill();
+    ctx.lineWidth=lip; ctx.strokeStyle=`rgb(${lipRGB})`;
+    ctx.beginPath(); ctx.ellipse(cx,yTop,rx-lip/2,ry-lip/2,0,0,Math.PI*2); ctx.stroke();
+    ctx.lineWidth=Math.max(1,lip/2); ctx.strokeStyle='rgba(255,253,248,.9)';
+    ctx.beginPath(); ctx.ellipse(cx,yTop,rx-lip/2,ry-lip/2,0,Math.PI*1.08,Math.PI*1.92); ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/* ---------- UI ---------- */
+const scroll=document.getElementById('scroll');
+function addGroup(t){const d=document.createElement('div');d.className='group';d.textContent=t;scroll.appendChild(d);return d;}
+function addSlider(key,label,lo,hi,res,unit){
+  const row=document.createElement('div'); row.className='row';
+  const n=document.createElement('span'); n.textContent=label;
+  const v=document.createElement('b'); v.textContent=fmt(P[key],res,unit);
+  row.append(n,v); scroll.appendChild(row);
+  const inp=document.createElement('input'); inp.type='range';
+  inp.min=lo; inp.max=hi; inp.step=res; inp.value=P[key];
+  inp.oninput=()=>{P[key]=parseFloat(inp.value); v.textContent=fmt(P[key],res,unit); render(.62); schedule();};
+  scroll.appendChild(inp); return inp;
+}
+function fmt(v,res,u){const s=res<.1?v.toFixed(2):(res<1?v.toFixed(1):Math.round(v));return s+(u?' '+u:'');}
+
+addGroup('样式');
+const chips=document.createElement('div'); chips.className='chips';
+Object.keys(PRESETS).forEach(name=>{
+  const b=document.createElement('div'); b.className='chip'; b.textContent=name;
+  b.onclick=()=>{Object.assign(P,PRESETS[name]); syncInputs(); render(1);};
+  chips.appendChild(b);
+});
+scroll.appendChild(chips);
+
+addGroup('罐身');
+const bodyInputs={};
+SPECS.slice(0,10).forEach(s=>{bodyInputs[s[0]]=addSlider(...s);});
+addGroup('视角与光');
+SPECS.slice(10).forEach(s=>{addSlider(...s);});
+
+addGroup('配色');
+['罐身','罐口'].forEach((t,i)=>{
+  const row=document.createElement('div'); row.className='row';
+  const n=document.createElement('span'); n.textContent=t+'色';
+  const b=document.createElement('b'); b.style.cursor='pointer'; b.textContent='选择中';
+  b.onclick=()=>{colorTarget=i===0?'body':'mouth'; markTarget();};
+  row.append(n,b); scroll.appendChild(row);
+});
+const swWrap=document.createElement('div'); swWrap.className='sw';
+const marks=[];
+SWATCH.forEach(c=>{
+  const i=document.createElement('i'); i.style.background=c;
+  i.onclick=()=>{ if(colorTarget==='body') P.body_hex=c; else P.mouth_hex=c; render(1); };
+  swWrap.appendChild(i);
+});
+scroll.appendChild(swWrap);
+function markTarget(){}
+
+document.getElementById('phi').onclick=()=>{
+  const d=P.body_w, phi=1.6180339887;
+  P.body_h=+(d*phi).toFixed(1); P.neck_w=+(d/phi).toFixed(1);
+  P.shoulder_h=+(P.body_h/Math.pow(phi,3)).toFixed(1);
+  P.mouth_w=Math.min(100,+(P.neck_w*1.12).toFixed(1));
+  syncInputs(); render(1);
+};
+document.getElementById('save').onclick=()=>{
+  const a=document.createElement('a'); a.download='phi-jar.png';
+  a.href=cv.toDataURL('image/png'); a.click();
+};
+function syncInputs(){
+  scroll.querySelectorAll('input[type=range]').forEach(inp=>{});
+  document.querySelectorAll('#scroll input[type=range]').forEach((inp,idx)=>{});
+  const all=SPECS;
+  const inputs=document.querySelectorAll('#scroll input[type=range]');
+  all.forEach((s,i)=>{ if(inputs[i]){inputs[i].value=P[s[0]];} });
+  document.querySelectorAll('#scroll .row b').forEach((b,i)=>{ if(all[i]) b.textContent=fmt(P[all[i][0]],all[i][2]?all[i][2]:1,''); });
+  render(1);
+}
+
+/* 交互：拖动转视角 / 滚轮缩放 */
+let drag=null;
+cv.addEventListener('mousedown',e=>{drag={x:e.clientX,y:e.clientY,tilt:P.tilt,spin:P.spin};});
+window.addEventListener('mousemove',e=>{
+  if(!drag)return;
+  P.tilt=Math.max(0,Math.min(40,drag.tilt+(e.clientY-drag.y)*.25));
+  P.spin=(drag.spin+(e.clientX-drag.x)*.6+360)%360;
+  render(.5); schedule();
+});
+window.addEventListener('mouseup',()=>{if(drag){drag=null;render(1);}});
+cv.addEventListener('wheel',e=>{e.preventDefault();P.zoom=Math.max(.6,Math.min(1.6,P.zoom*(e.deltaY>0?.94:1.06)));render(.7);schedule();},{passive:false});
+
+let timer=null;
+function schedule(){ if(timer)clearTimeout(timer); timer=setTimeout(()=>render(1),140); }
+window.addEventListener('resize',()=>render(1));
+render(1);
+</script>
+
+<script>
+/* ---------------- 追加功能：蓝图 / 矩阵 / 透明底 / 存参 ---------------- */
+function offRender(W, H, p, opts){
+  opts = opts || {};
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const pr = buildProfile(p);
+  const tilt = p.tilt*Math.PI/180, ct = Math.cos(tilt), st = Math.sin(tilt);
+  const scale = Math.min(H*0.78/Math.max(pr.total*ct,1), W*0.82/(2*pr.maxR))*p.zoom;
+  const baseY = H*0.89, cx = W*0.5;
+
+  if(!opts.transparent){
+    const bg = g.createLinearGradient(0,0,0,H);
+    bg.addColorStop(0,'#fbf5ec'); bg.addColorStop(1,'#eee0cf');
+    g.fillStyle = opts.bg || bg; g.fillRect(0,0,W,H);
+  }
+
+  const img = g.getImageData(0,0,W,H), data = img.data;
+  const tint = hex2rgb(p.body_hex).map(v=>v/255);
+  const az = p.light_az*Math.PI/180, el = p.light_el*Math.PI/180;
+  let Lx = Math.sin(az)*Math.cos(el), Ly = Math.sin(el), Lz = Math.cos(az)*Math.cos(el);
+  const spin = p.spin*Math.PI/180;
+  const lx = Lx*Math.cos(-spin)-Lz*Math.sin(-spin), lz = Lx*Math.sin(-spin)+Lz*Math.cos(-spin);
+  Lx = lx; Lz = lz;
+  const specPow=30, specStr=105*p.light_power, amb=.42, dif=.62;
+
+  for(let py=0; py<H; py++){
+    const wy = (baseY-py)/scale/Math.max(ct,1e-3);
+    if(wy<0 || wy>pr.total) continue;
+    let lo=0, hi=pr.ys.length-1;
+    while(lo<hi-1){const m=(lo+hi)>>1; if(pr.ys[m]<=wy) lo=m; else hi=m;}
+    const t = (wy-pr.ys[lo])/Math.max(pr.ys[hi]-pr.ys[lo],1e-6);
+    const r = pr.rs[lo]*(1-t)+pr.rs[hi]*t;
+    const dr = (pr.rs[hi]-pr.rs[lo])/Math.max(pr.ys[hi]-pr.ys[lo],1e-6);
+    if(r<=0) continue;
+    const rp = r*scale;
+    const x0 = Math.max(0,Math.floor(cx-rp)), x1 = Math.min(W-1,Math.ceil(cx+rp));
+    for(let px=x0; px<=x1; px++){
+      const X = (px-cx)/scale;
+      if(Math.abs(X)>r) continue;
+      const Z = Math.sqrt(Math.max(r*r-X*X,1e-6));
+      let nx=X, ny=-r*dr, nz=Z; const inv=1/Math.hypot(nx,ny,nz); nx*=inv; ny*=inv; nz*=inv;
+      const diff = Math.max(0,nx*Lx+ny*Ly+nz*Lz)*p.light_power;
+      const hx=Lx, hy=Ly, hz=Lz+1, hl=Math.hypot(hx,hy,hz);
+      const sp = Math.pow(Math.max(0,(nx*hx+ny*hy+nz*hz)/hl),specPow)*specStr;
+      const fres = Math.pow(1-nz,3)*26;
+      const edge = Math.min(1,(r-Math.abs(X))*scale);
+      const ao = 1-.34*Math.pow(1-edge,2);
+      const k = (amb+dif*diff)*ao;
+      const i4 = (py*W+px)*4;
+      data[i4]   = Math.min(255, 243*k*tint[0]+sp+fres*.9);
+      data[i4+1] = Math.min(255, 236*k*tint[1]+sp+fres*.86);
+      data[i4+2] = Math.min(255, 224*k*tint[2]+sp+fres*.8);
+      data[i4+3] = opts.transparent ? Math.round(255*edge) : 255;
+    }
+  }
+  g.putImageData(img,0,0);
+
+  // 罐口
+  const rx = (p.mouth_w/2)*scale*.96, ry = Math.max(rx*st, rx*.09);
+  if(rx>4){
+    const yTop = baseY-pr.total*ct*scale;
+    const lip = Math.max(2, Math.round(rx*.05));
+    const lc = hex2rgb(p.mouth_hex);
+    const deep = lc.map((v,i)=>Math.max(0,v*.16+[34,22,14][i]));
+    const mid  = lc.map((v,i)=>Math.max(0,v*.28+[44,29,18][i]));
+    const hiC  = lc.map((v,i)=>Math.max(0,v*.44+[50,34,22][i]));
+    g.beginPath(); g.ellipse(cx,yTop,rx,ry,0,0,Math.PI*2); g.fillStyle=`rgb(${deep})`; g.fill();
+    g.beginPath(); g.ellipse(cx,yTop,rx*.88,ry*.86,0,0,Math.PI*2); g.fillStyle=`rgb(${mid})`; g.fill();
+    g.beginPath(); g.ellipse(cx,yTop,rx*.72,ry*.72,0,0,Math.PI*2); g.fillStyle=`rgb(${hiC})`; g.fill();
+    g.lineWidth=lip; g.strokeStyle=`rgb(${lc})`;
+    g.beginPath(); g.ellipse(cx,yTop,rx-lip/2,ry-lip/2,0,0,Math.PI*2); g.stroke();
+    g.lineWidth=Math.max(1,lip/2); g.strokeStyle='rgba(255,253,248,.9)';
+    g.beginPath(); g.ellipse(cx,yTop,rx-lip/2,ry-lip/2,0,Math.PI*1.08,Math.PI*1.92); g.stroke();
+  }
+  return c;
+}
+
+function download(canvasOrUrl, name){
+  const a = document.createElement('a');
+  a.download = name;
+  a.href = (typeof canvasOrUrl === 'string') ? canvasOrUrl : canvasOrUrl.toDataURL('image/png');
+  a.click();
+}
+
+function exportBlueprint(){
+  const W=2000,H=2600, c=document.createElement('canvas'); c.width=W; c.height=H;
+  const g=c.getContext('2d');
+  g.fillStyle='#f8f6f1'; g.fillRect(0,0,W,H);
+  g.strokeStyle='#e2ddd4'; g.lineWidth=1;
+  for(let x=100;x<W-100;x+=40){g.beginPath();g.moveTo(x,100);g.lineTo(x,H-100);g.stroke();}
+  for(let y=100;y<H-100;y+=40){g.beginPath();g.moveTo(100,y);g.lineTo(W-100,y);g.stroke();}
+  g.strokeStyle='#d2ccc2'; g.lineWidth=3; g.strokeRect(100,100,W-200,H-200);
+
+  const pr=buildProfile(P);
+  const areaTop=320, areaBot=1960, areaL=200, areaR=1160;
+  const sc=Math.min((areaR-areaL)/(2*pr.maxR*1.12),(areaBot-areaTop)/(pr.total*1.06));
+  const cx=(areaL+areaR)/2, base=areaBot;
+  g.beginPath();
+  for(let i=0;i<pr.ys.length;i++){g.lineTo(cx-pr.rs[i]*sc, base-pr.ys[i]*sc);}
+  for(let i=pr.ys.length-1;i>=0;i--){g.lineTo(cx+pr.rs[i]*sc, base-pr.ys[i]*sc);}
+  g.closePath(); g.fillStyle='#eee9e1'; g.fill();
+  g.strokeStyle='#26221e'; g.lineWidth=4; g.stroke();
+
+  // 尺寸线
+  g.strokeStyle='#965c42'; g.fillStyle='#965c42'; g.lineWidth=2;
+  const hx=cx-pr.maxR*sc-52;
+  g.beginPath(); g.moveTo(hx,base-pr.total*sc); g.lineTo(hx,base); g.stroke();
+  g.font='bold 32px sans-serif'; g.textAlign='left';
+  g.fillText('H = '+pr.total.toFixed(1)+' mm', hx+16, base-pr.total*sc*0.5);
+  const dy=base+96;
+  g.beginPath(); g.moveTo(cx-pr.maxR*sc,dy); g.lineTo(cx+pr.maxR*sc,dy); g.stroke();
+  g.textAlign='center'; g.fillText('D = '+(pr.maxR*2).toFixed(1)+' mm', cx, dy+44);
+
+  // 参数表
+  g.textAlign='left'; g.fillStyle='#2c3e50'; g.font='bold 30px sans-serif';
+  g.fillText('PARAMETERS', 1300, 366);
+  g.font='26px sans-serif'; g.fillStyle='#4a443e';
+  let ty=430;
+  SPECS.slice(0,10).forEach(s=>{
+    g.fillStyle='#6a625a'; g.fillText(s[1], 1300, ty);
+    g.fillStyle='#26221e'; g.textAlign='right';
+    g.fillText(P[s[0]].toFixed(s[2]<1?2:0)+(s[4]?' '+s[4]:''), W-190, ty);
+    g.textAlign='left'; ty+=46;
+  });
+  g.fillStyle='#2c3e50'; g.font='bold 30px sans-serif'; g.fillText('RATIOS', 1300, ty+30);
+  const phi=1.6180339887;
+  const ratios=[['H / D',P.body_h/P.body_w,phi],['neck / D',P.neck_w/P.body_w,1/phi],
+                ['shoulder / H',P.shoulder_h/P.body_h,1/Math.pow(phi,3)]];
+  g.font='26px sans-serif';
+  ratios.forEach((r,i)=>{
+    const yy=ty+82+i*44;
+    g.fillStyle='#6a625a'; g.fillText(r[0],1300,yy);
+    g.fillStyle='#26221e'; g.textAlign='right'; g.fillText(r[1].toFixed(3),W-380,yy);
+    g.fillStyle='#965c42'; g.fillText('phi '+r[2].toFixed(3),W-190,yy);
+    g.textAlign='left';
+  });
+  g.fillStyle='#26221e'; g.font='bold 34px sans-serif';
+  g.fillText('PHI JAR / PARAMETRIC VESSEL', 130, H-160);
+  g.font='24px sans-serif'; g.fillStyle='#6a625a';
+  g.fillText('front elevation · 1:2 · drawn in browser · 2025', 130, H-120);
+  download(c,'jar_blueprint.png');
+}
+
+function exportMatrix(){
+  const cols=4, rows=3, cw=430, ch=560, pad=40, top=190;
+  const W=pad*2+cols*cw, H=top+rows*ch+80;
+  const c=document.createElement('canvas'); c.width=W; c.height=H;
+  const g=c.getContext('2d');
+  g.fillStyle='#f8f6f1'; g.fillRect(0,0,W,H);
+  g.fillStyle='#2c3e50'; g.font='bold 48px sans-serif'; g.fillText('PARAMETER MATRIX', pad, 80);
+  g.font='24px sans-serif'; g.fillStyle='#6a625a';
+  g.fillText('neck height × belly bulge · twelve variants of the same system', pad, 126);
+  const necks=[0.6,0.9,1.2,1.5].map(f=>P.neck_h*f);
+  const bellies=[-0.03,0.03,0.09].map(d=>Math.max(0,Math.min(.24,P.belly+d)));
+  for(let r=0;r<rows;r++)for(let col=0;col<cols;col++){
+    const q=Object.assign({},P,{neck_h:necks[col],belly:bellies[r]});
+    const tile=offRender(cw-24,ch-96,q,{});
+    const x=pad+col*cw+12, y=top+r*ch+8;
+    g.drawImage(tile,x,y);
+    g.strokeStyle='#d8d2c8'; g.lineWidth=2; g.strokeRect(x,y,tile.width,tile.height);
+    g.fillStyle='#6e6860'; g.font='20px sans-serif';
+    g.fillText('neck '+necks[col].toFixed(0)+'  ·  belly '+bellies[r].toFixed(2), x+4, y+tile.height+26);
+  }
+  download(c,'jar_matrix.png');
+}
+
+function exportTransparent(){
+  const c = offRender(1400,1300,P,{transparent:true});
+  download(c,'jar_cutout.png');
+}
+
+function saveParams(){
+  const data={};
+  Object.keys(P).forEach(k=>{ if(!k.startsWith('_')) data[k]=P[k]; });
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.download='jar_params.json';
+  a.href=URL.createObjectURL(blob); a.click();
+}
+
+function loadParams(){
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='.json';
+  inp.onchange=()=>{
+    const f=inp.files[0]; if(!f) return;
+    const rd=new FileReader();
+    rd.onload=()=>{ try{ Object.assign(P, JSON.parse(rd.result)); syncInputs(); render(1);}catch(e){alert('文件格式不对');} };
+    rd.readAsText(f);
+  };
+  inp.click();
+}
+
+/* 按钮行追加 */
+(function(){
+  const bar=document.getElementById('save').parentElement;
+  const defs=[['蓝图',exportBlueprint],['矩阵',exportMatrix],['透明底',exportTransparent],
+              ['存参',saveParams],['读参',loadParams]];
+  defs.forEach(([t,fn])=>{
+    const b=document.createElement('button');
+    b.className='btn'; b.textContent=t; b.onclick=fn;
+    b.style.fontSize='11px'; b.style.padding='9px 0';
+    bar.appendChild(b);
+  });
+  bar.style.flexWrap='wrap';
+})();
+</script>
+
+</body>
+</html>

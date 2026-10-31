@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>两个工具 · PHI JAR &amp; CAMP WATCH</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#141a16;color:#e8dcc6;font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;padding:56px 24px 40px}
+  .wrap{max-width:1080px;margin:0 auto}
+  .kick{font-size:12px;letter-spacing:.3em;color:#e8b45a}
+  h1{font-size:clamp(34px,5.6vw,58px);font-weight:800;margin-top:14px;line-height:1.05}
+  h1 small{display:block;font-size:.3em;letter-spacing:.32em;color:rgba(232,220,198,.45);
+    font-weight:600;margin-top:12px}
+  .lead{margin-top:16px;font-size:14.5px;line-height:1.85;color:rgba(232,220,198,.7);max-width:640px}
+  .cards{display:flex;gap:18px;margin-top:34px;flex-wrap:wrap}
+  .card{flex:1 1 420px;background:#1b2420;border:1px solid rgba(232,220,198,.16);
+    border-radius:18px;overflow:hidden;text-decoration:none;color:inherit;display:block;transition:.2s}
+  .card:hover{transform:translateY(-4px);border-color:rgba(232,180,90,.45)}
+  .card img{width:100%;height:230px;object-fit:cover;display:block}
+  .card .body{padding:20px 22px 24px}
+  .card i{display:block;font-style:normal;font-size:11px;letter-spacing:.24em;color:#e8b45a;margin-bottom:8px}
+  .card b{font-size:18px}
+  .card p{margin-top:9px;font-size:13px;line-height:1.8;color:rgba(232,220,198,.62)}
+  .tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+  .tag{display:inline-block;font-size:11.5px;padding:6px 13px;border-radius:999px;
+    border:1px solid rgba(232,220,198,.22);color:#e8b45a;text-decoration:none}
+  .tag.solid{background:#e8b45a;color:#20180c;border-color:transparent;font-weight:700}
+  section{margin-top:56px;border-top:1px solid rgba(232,220,198,.14);padding-top:40px}
+  .sec{display:flex;align-items:baseline;gap:14px;margin-bottom:20px}
+  .sec b{font-size:12px;letter-spacing:.3em;color:#c9603f}
+  .sec h2{font-size:clamp(19px,2.6vw,26px);font-weight:750}
+  .text{font-size:14px;line-height:1.95;color:rgba(232,220,198,.72);max-width:900px}
+  .gal{display:flex;gap:12px;margin-top:22px;flex-wrap:wrap}
+  .gal figure{flex:1 1 240px;border:1px solid rgba(232,220,198,.14);border-radius:12px;overflow:hidden}
+  .gal img{width:100%;display:block}
+  .gal figcaption{font-size:11.5px;color:rgba(232,220,198,.5);padding:8px 10px;
+    border-top:1px solid rgba(232,220,198,.14)}
+  .facts{display:flex;gap:32px;flex-wrap:wrap;margin-top:26px}
+  .fact b{display:block;font-size:24px;color:#e8b45a;font-weight:750}
+  .fact span{font-size:11px;letter-spacing:.1em;color:rgba(232,220,198,.55)}
+  footer{margin-top:64px;border-top:1px solid rgba(232,220,198,.14);padding-top:22px;
+    display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;
+    font-size:12.5px;color:rgba(232,220,198,.5)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="kick">SELECTED WORK · 2025</div>
+  <h1>两个工具<small>PHI JAR &amp; CAMP WATCH</small></h1>
+  <p class="lead">One is about proportion, colour and surface. The other is about time pressure and command.
+    Both are single-file programs — every pixel, proportion and colour comes from code.</p>
+
+  <div class="cards">
+    <div class="card" onclick="location.href='camp-watch-desktop.zip'" style="cursor:pointer">
+      <img src="img/night.png" alt="">
+      <div class="body">
+        <i>02 &nbsp;·&nbsp; GAME</i>
+        <b>营地守望 Camp Watch</b>
+        <p>昼夜循环的守城策略：白天建造、夜里守家。血月每 8 天一次，两座 AI 营地互相攻伐，老兵会成长，三顶王冠丢了才真的输。</p>
+        <div class="tags">
+          <span class="tag solid">⬇ 下载电脑版（最终版）</span>
+          <a class="tag" href="play.html" onclick="event.stopPropagation()">▶ 网页预览版</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" onclick="location.href='jar.html'" style="cursor:pointer">
+      <img src="img/colors.jpg" alt="">
+      <div class="body">
+        <i>01 &nbsp;·&nbsp; TOOL</i>
+        <b>PHI JAR 参数化罐体设计器</b>
+        <p>十项参数驱动一只陶罐，黄金分割一键锁定；<b style="color:#e8b45a">罐身与罐口可分别配色</b>，四种材质，可出渲染、蓝图与 12 变体矩阵。</p>
+        <div class="tags">
+          <span class="tag solid">⬇ 下载桌面版（含配色）</span>
+          <a class="tag" href="jar.html" onclick="event.stopPropagation()">▶ 网页预览版</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section>
+    <div class="sec"><b>01</b><h2>PHI JAR · 参数化罐体设计器</h2></div>
+    <p class="text">A parametric studio for ceramic vessels. Instead of drawing a silhouette, you set ten numbers —
+      body width, neck height, shoulder radius, rim thickness — and the tool rebuilds the form, with the golden ratio
+      available as a one-click constraint. Glaze, colour and hand-painted decoration layer on top, and every result
+      exports as a render, a dimensioned blueprint or a twelve-up family sheet.</p>
+    <div class="gal">
+      <figure><img src="img/colors.jpg" alt=""><figcaption>四种釉色 · 罐身与罐口分别配色</figcaption></figure>
+      <figure><img src="img/mouth.png" alt=""><figcaption>罐口细节 · 唇环与内壁</figcaption></figure>
+      <figure><img src="img/blueprint.png" alt=""><figcaption>蓝图导出 · 尺寸与比例校验</figcaption></figure>
+      <figure><img src="img/matrix.png" alt=""><figcaption>参数矩阵 · 12 个变体</figcaption></figure>
+    </div>
+    <div class="facts">
+      <div class="fact"><b>φ 1.618</b><span>一键锁定比例</span></div>
+      <div class="fact"><b>10 / 6</b><span>参数 / 预设</span></div>
+      <div class="fact"><b>4</b><span>材质</span></div>
+      <div class="fact"><b>3</b><span>导出 · 渲染/蓝图/矩阵</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec"><b>02</b><h2>CAMP WATCH · 昼夜守城（PC 完整版）</h2></div>
+    <p class="text">A day-night defence game built around a single rhythm: spend the day, survive the night.
+      You never swing a sword — you assign roles, raise walls, branch your towers and decide when to send the knights out.
+      Blood moons every eight days escalate the enemy mix, two rival camps raid and fight each other, and weather
+      rewrites your ranged options.</p>
+    <div class="gal">
+      <figure><img src="img/night.png" alt=""><figcaption>夜战</figcaption></figure>
+      <figure><img src="img/report.png" alt=""><figcaption>每夜战报</figcaption></figure>
+      <figure><img src="img/menu.png" alt=""><figcaption>开局难度</figcaption></figure>
+    </div>
+    <div class="facts">
+      <div class="fact"><b>62 fps</b><span>1200×760</span></div>
+      <div class="fact"><b>5 / 6</b><span>职业 / 怪种</span></div>
+      <div class="fact"><b>140s</b><span>一天一夜</span></div>
+      <div class="fact"><b>3×3</b><span>难度 × 结局</span></div>
+    </div>
+  </section>
+
+  <footer>
+    <div>张永航 · 产设 261 · 2025</div>
+    <div>电脑版：Python 桌面程序 · 网页版：浏览器移植</div>
+  </footer>
+</div>
+</body>
+</html>
